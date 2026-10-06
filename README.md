@@ -138,6 +138,8 @@ pnpm dev
 
 | 命令 | 用途 |
 | --- | --- |
+| `pnpm format` | 按统一规则格式化源码、测试与配置 |
+| `pnpm format:check` | 检查格式，供提交前和 CI 使用 |
 | `pnpm typecheck` | TypeScript 类型检查 |
 | `pnpm test` | 自动测试 |
 | `pnpm build` | 编译主进程与前端 |
@@ -146,6 +148,8 @@ pnpm dev
 | `pnpm dist:win` | 生成 Windows x64 NSIS 安装包 |
 
 开发入口同时启动 Vite 与 Electron。需要隔离测试资料时，通过 `GOODS_WORKSPACE_DATA_DIR` 指定目录；正常启动使用系统应用数据目录。
+
+GitHub Actions 在 Linux、Windows 上执行格式检查、类型检查、测试和构建。当前 main 分支包含工程整理，已发布的 0.1.45 安装包未重新构建；安装包的验收范围以对应 Release 为准。
 
 <details>
 <summary><strong>项目目录</strong></summary>

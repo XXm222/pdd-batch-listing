@@ -1,77 +1,267 @@
-export type Asset = { id: string; name: string; url: string; bytes: number; width: number; height: number };
+export type Asset = {
+  id: string;
+  name: string;
+  url: string;
+  bytes: number;
+  width: number;
+  height: number;
+};
 export type ImageTarget = { kind: 'main' | 'detail' | 'sku'; index?: number };
-export type Sku = { spec: string; group: string; single: string; stock: string; code?: string; image?: string; options?: { name: string; value: string }[] };
+export type Sku = {
+  spec: string;
+  group: string;
+  single: string;
+  stock: string;
+  code?: string;
+  image?: string;
+  options?: { name: string; value: string }[];
+};
 export type ProductAttribute = { name: string; value: string; required: boolean };
 export type Services = { sevenDay: string; invoice: string; authenticity: string };
 export type Product = {
-  id: string; code: string; title: string; category: string; brand: string; material: string; audience: string;
-  foldable: string; reference: string; skuCode: string; discount: string; shipping: string; freight: string;
-  expectedShop: string; demo: boolean; source: string; skus: Sku[]; main: string[]; detail: string[];
-  images: Record<string, Asset>; savedAt?: string; templateFormat: string;
-  attributes?: ProductAttribute[]; services?: Services; demoDeclared?: boolean;
+  id: string;
+  code: string;
+  title: string;
+  category: string;
+  brand: string;
+  material: string;
+  audience: string;
+  foldable: string;
+  reference: string;
+  skuCode: string;
+  discount: string;
+  shipping: string;
+  freight: string;
+  expectedShop: string;
+  demo: boolean;
+  source: string;
+  skus: Sku[];
+  main: string[];
+  detail: string[];
+  images: Record<string, Asset>;
+  savedAt?: string;
+  templateFormat: string;
+  attributes?: ProductAttribute[];
+  services?: Services;
+  demoDeclared?: boolean;
 };
-export type Shop = { id: string; name: string; account: string; credentialsSaved: boolean; updatedAt: string };
-export type ShopLoginStatus = 'running'|'succeeded'|'verification_required'|'credentials_rejected'|'failed';
-export type ShopLoginEvent = { name:string; startedAt:string; status:'running'|'done'|'failed'; durationMs?:number };
-export type ShopLoginResult = { shopId:string; status:ShopLoginStatus; message:string; startedAt:string; durationMs?:number; events:ShopLoginEvent[];errorCode?:TaskErrorCode };
-export type TaskStatus = 'prepared' | 'running' | 'awaiting_user' | 'succeeded' | 'failed' | 'uncertain';
-export type TaskStep = 'connect' | 'login' | 'resources' | 'form' | 'basic' | 'skus' | 'services' | 'images' | 'pre_save' | 'save' | 'saved_fields' | 'draft_list';
-export type RecoveryAction = 'retry' | 'inspect_form' | 'readback' | 'edit_product' | 'confirm_shop' | 'restart_form';
-export type TaskErrorCode = 'invalid_product' | 'shop_changed' | 'login_required' | 'browser_unavailable' | 'page_timeout' | 'form_changed' | 'form_lost' | 'upload_uncertain' | 'save_uncertain' | 'paused' | 'platform_changed';
-export type BackendCheck = { key?:string; label:string; status:'pending'|'passed'|'failed'|'not_checked'|'not_applicable'; message?:string; checkedAt?:string; stage?:'form'|'saved' };
-export type StepTiming = { name:string; step?:TaskStep; attempt:number; startedAt:string; endedAt?:string; durationMs?:number; status:'running'|'done'|'failed'|'interrupted' };
-export type Task = { id: string; shopId: string; shopName: string; code: string; title: string; status: TaskStatus; time: string; productSnapshot: Product;
-  backendChecks?: BackendCheck[]; phase?: string; message?: string; formUrl?: string; goodsId?: string; saveAttemptedAt?: string;
-  result?: {goodsId:string;status:string;shopName:string;title:string;verifiedAt:string}; logs?: {time:string;message:string}[]; evidence?: string; startedAt?: string; completedAt?: string;
-  attempt?:number; timings?:StepTiming[]; runElapsedMs?:number; revision?:number; clearedAt?:string|null;
-  shopSnapshot?:{name:string;account:string;updatedAt:string};
-  checkpoint?:{step:TaskStep;state:'running'|'done';updatedAt:string};
-  error?:{code:TaskErrorCode;message:string;recovery:RecoveryAction;details?:Record<string,unknown>};
+export type Shop = {
+  id: string;
+  name: string;
+  account: string;
+  credentialsSaved: boolean;
+  updatedAt: string;
+};
+export type ShopLoginStatus =
+  'running' | 'succeeded' | 'verification_required' | 'credentials_rejected' | 'failed';
+export type ShopLoginEvent = {
+  name: string;
+  startedAt: string;
+  status: 'running' | 'done' | 'failed';
+  durationMs?: number;
+};
+export type ShopLoginResult = {
+  shopId: string;
+  status: ShopLoginStatus;
+  message: string;
+  startedAt: string;
+  durationMs?: number;
+  events: ShopLoginEvent[];
+  errorCode?: TaskErrorCode;
+};
+export type TaskStatus =
+  'prepared' | 'running' | 'awaiting_user' | 'succeeded' | 'failed' | 'uncertain';
+export type TaskStep =
+  | 'connect'
+  | 'login'
+  | 'resources'
+  | 'form'
+  | 'basic'
+  | 'skus'
+  | 'services'
+  | 'images'
+  | 'pre_save'
+  | 'save'
+  | 'saved_fields'
+  | 'draft_list';
+export type RecoveryAction =
+  'retry' | 'inspect_form' | 'readback' | 'edit_product' | 'confirm_shop' | 'restart_form';
+export type TaskErrorCode =
+  | 'invalid_product'
+  | 'shop_changed'
+  | 'login_required'
+  | 'browser_unavailable'
+  | 'page_timeout'
+  | 'form_changed'
+  | 'form_lost'
+  | 'upload_uncertain'
+  | 'save_uncertain'
+  | 'paused'
+  | 'platform_changed';
+export type BackendCheck = {
+  key?: string;
+  label: string;
+  status: 'pending' | 'passed' | 'failed' | 'not_checked' | 'not_applicable';
+  message?: string;
+  checkedAt?: string;
+  stage?: 'form' | 'saved';
+};
+export type StepTiming = {
+  name: string;
+  step?: TaskStep;
+  attempt: number;
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  status: 'running' | 'done' | 'failed' | 'interrupted';
+};
+export type Task = {
+  id: string;
+  shopId: string;
+  shopName: string;
+  code: string;
+  title: string;
+  status: TaskStatus;
+  time: string;
+  productSnapshot: Product;
+  backendChecks?: BackendCheck[];
+  phase?: string;
+  message?: string;
+  formUrl?: string;
+  goodsId?: string;
+  saveAttemptedAt?: string;
+  result?: { goodsId: string; status: string; shopName: string; title: string; verifiedAt: string };
+  logs?: { time: string; message: string }[];
+  evidence?: string;
+  startedAt?: string;
+  completedAt?: string;
+  attempt?: number;
+  timings?: StepTiming[];
+  runElapsedMs?: number;
+  revision?: number;
+  clearedAt?: string | null;
+  shopSnapshot?: { name: string; account: string; updatedAt: string };
+  checkpoint?: { step: TaskStep; state: 'running' | 'done'; updatedAt: string };
+  error?: {
+    code: TaskErrorCode;
+    message: string;
+    recovery: RecoveryAction;
+    details?: Record<string, unknown>;
+  };
   /** One-use Agent recovery intent: verify an existing login, never submit credentials. */
-  loginCheckOnly?:true;
-  skuImageManifest?:{goodsId:string;slots:Record<string,{assetId:string;remoteUrl:string}>};
-  uploadManifest?:{goodsId:string;main:string[];detail:string[]}; uploadSubmission?:{goodsId:string;main?:string[];detail?:string[]}; previousGoodsIds?:string[]; agentDiagnosis?:AgentDiagnosis; automaticDiagnosisAttempt?:number; autoRecoveryCount?:number };
-export type TaskUpdate = Omit<Task,'productSnapshot'>;
-export type AgentConfig = { baseUrl:string; model:string; keySaved:boolean; updatedAt?:string; autoDiagnose?:boolean; autoReadPage?:boolean; autoRecover?:boolean };
-export type AgentConfigInput = { baseUrl:string; model:string; apiKey:string; clearKey?:boolean; autoDiagnose?:boolean; autoReadPage?:boolean; autoRecover?:boolean };
-export type AgentAction = 'edit_product'|'resume'|'readback'|'manual';
-export type AgentProposal = { action:AgentAction; reason:string; evidence:string[] };
-export type AgentDiagnosis = { id:string; status:'running'|'done'|'failed'|'interrupted'; startedAt:string; completedAt?:string; durationMs?:number; model:string; endpoint:string; fingerprint:string; summary?:string; proposals?:AgentProposal[]; error?:string; sources:string[]; tokens?:number; pageRequested:boolean; trigger?:'manual'|'automatic'; automaticAction?:'resume'|'readback'; operations?:{name:string;ok:boolean;message:string;durationMs:number}[] };
-export type Workspace = { products: Product[]; shops: Shop[]; tasks: Task[]; version: string; encryptionAvailable: boolean };
+  loginCheckOnly?: true;
+  skuImageManifest?: {
+    goodsId: string;
+    slots: Record<string, { assetId: string; remoteUrl: string }>;
+  };
+  uploadManifest?: { goodsId: string; main: string[]; detail: string[] };
+  uploadSubmission?: { goodsId: string; main?: string[]; detail?: string[] };
+  previousGoodsIds?: string[];
+  agentDiagnosis?: AgentDiagnosis;
+  automaticDiagnosisAttempt?: number;
+  autoRecoveryCount?: number;
+};
+export type TaskUpdate = Omit<Task, 'productSnapshot'>;
+export type AgentConfig = {
+  baseUrl: string;
+  model: string;
+  keySaved: boolean;
+  updatedAt?: string;
+  autoDiagnose?: boolean;
+  autoReadPage?: boolean;
+  autoRecover?: boolean;
+};
+export type AgentConfigInput = {
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  clearKey?: boolean;
+  autoDiagnose?: boolean;
+  autoReadPage?: boolean;
+  autoRecover?: boolean;
+};
+export type AgentAction = 'edit_product' | 'resume' | 'readback' | 'manual';
+export type AgentProposal = { action: AgentAction; reason: string; evidence: string[] };
+export type AgentDiagnosis = {
+  id: string;
+  status: 'running' | 'done' | 'failed' | 'interrupted';
+  startedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  model: string;
+  endpoint: string;
+  fingerprint: string;
+  summary?: string;
+  proposals?: AgentProposal[];
+  error?: string;
+  sources: string[];
+  tokens?: number;
+  pageRequested: boolean;
+  trigger?: 'manual' | 'automatic';
+  automaticAction?: 'resume' | 'readback';
+  operations?: { name: string; ok: boolean; message: string; durationMs: number }[];
+};
+export type Workspace = {
+  products: Product[];
+  shops: Shop[];
+  tasks: Task[];
+  version: string;
+  encryptionAvailable: boolean;
+};
 export type ShopInput = { id?: string; name: string; account: string; password: string };
-export type BrowserConnectionStatus = {state:'ready'|'extension_disconnected'|'service_unavailable'|'version_mismatch'|'unsupported';message:string;httpAddress:string;wsAddress:string;serviceVersion?:string;extensionVersion?:string;suggestedCommand?:string};
+export type BrowserConnectionStatus = {
+  state:
+    'ready' | 'extension_disconnected' | 'service_unavailable' | 'version_mismatch' | 'unsupported';
+  message: string;
+  httpAddress: string;
+  wsAddress: string;
+  serviceVersion?: string;
+  extensionVersion?: string;
+  suggestedCommand?: string;
+};
 export interface DesktopApi {
-  browserConnection():Promise<BrowserConnectionStatus>;
-  exportBrowserExtension():Promise<{folder:string;zip:string}>;
-  copyBrowserExtensionPath():Promise<{folder:string;zip:string}>;
-  openBrowserGuide():Promise<void>;
-  openBrowserHelp():Promise<void>;
-  copyBridgeAddress():Promise<void>;
-  copyExtensionPage(browser:'chrome'|'edge'):Promise<void>;
+  browserConnection(): Promise<BrowserConnectionStatus>;
+  exportBrowserExtension(): Promise<{ folder: string; zip: string }>;
+  copyBrowserExtensionPath(): Promise<{ folder: string; zip: string }>;
+  openBrowserGuide(): Promise<void>;
+  openBrowserHelp(): Promise<void>;
+  copyBridgeAddress(): Promise<void>;
+  copyExtensionPage(browser: 'chrome' | 'edge'): Promise<void>;
   load(): Promise<Workspace>;
   importData(kind: 'excel' | 'folder' | 'example'): Promise<Product[] | null>;
   supplement(): Promise<Asset[] | null>;
   saveProducts(products: Product[]): Promise<Workspace>;
   saveShop(input: ShopInput): Promise<Workspace>;
-  loginShop(input:{id:string;mode:'relogin'|'check'}):Promise<ShopLoginResult>;
-  onShopLoginChanged(listener:(result:ShopLoginResult)=>void):()=>void;
-  prepareTasks(input: { shopId: string; productIds: string[] }): Promise<{workspace:Workspace;taskIds:string[]}>;
+  loginShop(input: { id: string; mode: 'relogin' | 'check' }): Promise<ShopLoginResult>;
+  onShopLoginChanged(listener: (result: ShopLoginResult) => void): () => void;
+  prepareTasks(input: {
+    shopId: string;
+    productIds: string[];
+  }): Promise<{ workspace: Workspace; taskIds: string[] }>;
   runTasks(ids: string[]): Promise<Workspace>;
   resumeTask(id: string): Promise<Workspace>;
   restartTask(id: string): Promise<Workspace>;
   confirmTaskShop(id: string): Promise<Workspace>;
-  updateTaskProduct(id:string):Promise<Workspace>;
-  onTaskChanged(listener:(task:TaskUpdate)=>void):()=>void;
+  updateTaskProduct(id: string): Promise<Workspace>;
+  onTaskChanged(listener: (task: TaskUpdate) => void): () => void;
   stopTasks(): Promise<Workspace>;
-  clearTaskRecords(ids:string[]):Promise<Workspace>;
-  restoreTaskRecords(ids:string[]):Promise<Workspace>;
+  clearTaskRecords(ids: string[]): Promise<Workspace>;
+  restoreTaskRecords(ids: string[]): Promise<Workspace>;
   openEvidence(id: string): Promise<void>;
   downloadTemplate(kind?: 'blank' | 'example'): Promise<boolean>;
   showDataFolder(): Promise<void>;
-  agentConfig():Promise<AgentConfig>;
-  saveAgentConfig(input:AgentConfigInput):Promise<AgentConfig>;
-  testAgentConfig(input:AgentConfigInput):Promise<{model:string;durationMs:number}>;
-  diagnoseTask(input:{id:string;includePage:boolean}):Promise<Workspace>;
-  confirmAgentAction(input:{id:string;diagnosisId:string;proposalIndex:number}):Promise<Workspace>;
+  agentConfig(): Promise<AgentConfig>;
+  saveAgentConfig(input: AgentConfigInput): Promise<AgentConfig>;
+  testAgentConfig(input: AgentConfigInput): Promise<{ model: string; durationMs: number }>;
+  diagnoseTask(input: { id: string; includePage: boolean }): Promise<Workspace>;
+  confirmAgentAction(input: {
+    id: string;
+    diagnosisId: string;
+    proposalIndex: number;
+  }): Promise<Workspace>;
 }
-declare global { interface Window { desktop: DesktopApi } }
+declare global {
+  interface Window {
+    desktop: DesktopApi;
+  }
+}

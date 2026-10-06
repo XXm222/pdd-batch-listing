@@ -14,7 +14,9 @@
     "test": "tsc -p tsconfig.electron.json && node --test tests/*.test.cjs",
     "pack:mac": "pnpm build && electron-builder --mac dir",
     "dist:mac": "pnpm build && electron-builder --mac dmg",
-    "dist:win": "pnpm build && electron-builder --win nsis --x64"
+    "dist:win": "pnpm build && electron-builder --win nsis --x64",
+    "format": "prettier --write src electron tests scripts *.json *.yaml *.ts index.html .prettierrc.json .github/workflows/*.yml",
+    "format:check": "prettier --check src electron tests scripts *.json *.yaml *.ts index.html .prettierrc.json .github/workflows/*.yml"
   },
   "dependencies": {
     "fast-xml-parser": "5.11.1",
@@ -31,6 +33,7 @@
     "electron": "44.4.0",
     "electron-builder": "26.15.3",
     "lucide-react": "1.48.0",
+    "prettier": "3.9.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "typescript": "5.9.3",
