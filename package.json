@@ -1,0 +1,76 @@
+{
+  "name": "goods-workspace",
+  "productName": "商品运营台",
+  "version": "0.1.45",
+  "private": true,
+  "description": "商品资料导入与店铺草稿工作台",
+  "author": "商品运营台项目",
+  "main": "dist-electron/electron/main.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
+    "build": "tsc -p tsconfig.electron.json && tsc --noEmit -p tsconfig.json && vite build",
+    "start": "electron .",
+    "test": "tsc -p tsconfig.electron.json && node --test tests/*.test.cjs",
+    "pack:mac": "pnpm build && electron-builder --mac dir",
+    "dist:mac": "pnpm build && electron-builder --mac dmg",
+    "dist:win": "pnpm build && electron-builder --win nsis --x64"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.11.1",
+    "image-size": "2.0.4",
+    "jszip": "3.10.2",
+    "sql.js": "1.14.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/sql.js": "1.4.11",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "44.4.0",
+    "electron-builder": "26.15.3",
+    "lucide-react": "1.48.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.6"
+  },
+  "build": {
+    "appId": "com.goodsworkspace.desktop",
+    "productName": "商品运营台",
+    "directories": {
+      "output": "release/0.1.45"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "resources/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.business",
+      "identity": "-",
+      "signIgnore": [
+        "/bridge-runtime/"
+      ]
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "artifactName": "GoodsWorkspace-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "icon": "resources/icon.png",
+    "asarUnpack": [
+      "dist-electron/**",
+      "node_modules/**",
+      "resources/**"
+    ]
+  },
+  "packageManager": "pnpm@11.19.0"
+}

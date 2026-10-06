@@ -1,0 +1,33 @@
+{
+  "provider": "Moonshot AI / Kimi",
+  "version": "2.0.22",
+  "checkedOn": "2026-10-04",
+  "officialPage": "https://www.kimi.com/products/kimi-browser-extension",
+  "helpPage": "https://www.kimi.com/help/kimi-webbridge/kimi-webbridge-introduction",
+  "files": [
+    {
+      "path": "browser-extension/kimi-browser-extension.zip",
+      "url": "https://kimi-web-img.kimi.ai/webbridge/latest/extension/kimi-webbridge-extension.zip",
+      "bytes": 2493523,
+      "sha256": "a74032adb9d62aee2fe5dc108f8afa927a3e5dbd9470a8cb87c5d1edad61b415"
+    },
+    {
+      "path": "bridge-runtime/darwin-arm64/kimi-webbridge",
+      "url": "https://cdn.kimi.com/webbridge/v2.0.22/releases/kimi-webbridge-darwin-arm64",
+      "bytes": 9677250,
+      "sha256": "f36dfeba6d5925318a38a4cbe688fa83c4b2bb899c8b05be4fac0848980901f0"
+    },
+    {
+      "path": "bridge-runtime/darwin-x64/kimi-webbridge",
+      "url": "https://cdn.kimi.com/webbridge/v2.0.22/releases/kimi-webbridge-darwin-amd64",
+      "bytes": 10253584,
+      "sha256": "ad9aba7d4a2a5c45f60d72fcb00855220610c884f8b832ecb8869b0c1898d4ba"
+    },
+    {
+      "path": "bridge-runtime/win32-x64/kimi-webbridge.exe",
+      "url": "https://cdn.kimi.com/webbridge/v2.0.22/releases/kimi-webbridge-windows-amd64.exe",
+      "bytes": 10347520,
+      "sha256": "8e9dfc5bb83ca696acd3e873e8cba45933d3d5b379fc1aed88641370d0eeb338"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "CommonJS", "moduleResolution": "Node",
+    "strict": true, "esModuleInterop": true, "skipLibCheck": true,
+    "outDir": "dist-electron", "rootDir": ".", "types": ["node"]
+  },
+  "include": ["electron", "src/types.ts", "src/domain.ts", "src/task-progress.ts"]
+}
