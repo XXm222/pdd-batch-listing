@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="460" viewBox="0 0 1440 460" role="img" aria-labelledby="title desc">
+  <title id="title">商品运营台 · Goods Workspace</title>
+  <desc id="desc">从 Excel 商品资料到拼多多后台草稿：导入资料、核对规格、保存草稿。Windows 与 macOS 桌面工作台。</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#111c38"/><stop offset="1" stop-color="#1a3155"/></linearGradient>
+    <linearGradient id="accent" x2="1" y2="1"><stop stop-color="#5879ff"/><stop offset="1" stop-color="#3154bd"/></linearGradient>
+  </defs>
+  <rect width="1440" height="460" rx="24" fill="url(#bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-opacity=".045">
+    <path d="M0 100H1440M0 180H1440M0 260H1440M0 340H1440M160 0V460M320 0V460M480 0V460M640 0V460M800 0V460M960 0V460M1120 0V460M1280 0V460"/>
+    <circle cx="1240" cy="110" r="220"/><circle cx="1240" cy="110" r="280"/>
+  </g>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif">
+    <g transform="translate(64 54)">
+      <rect width="58" height="58" rx="16" fill="url(#accent)"/>
+      <g transform="translate(7 7) scale(.086)" fill="none" stroke="#fff" stroke-width="21" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M256 93l82 45v94l-82 45-82-45v-94zM174 138l82 46 82-46M256 184v93M171 237l-78 45v94l82 45 81-45v-96M93 282l82 46 81-46M175 328v93M337 237l82 45v94l-82 45-81-45M256 282l81 46 82-46M337 328v93"/>
+      </g>
+      <text x="76" y="25" fill="#fff" font-size="20" font-weight="600">GOODS WORKSPACE</text>
+      <text x="76" y="48" fill="#94a9d1" font-size="12" letter-spacing="2">LOCAL DESKTOP · PRIVATE SOURCE</text>
+    </g>
+    <text x="64" y="204" fill="#fff" font-size="58" font-weight="700" letter-spacing="2">商品运营台</text>
+    <text x="66" y="250" fill="#c6d3ec" font-size="24">把商品资料，变成可核对的后台草稿。</text>
+    <text x="66" y="294" fill="#93a9cc" font-size="17">Excel 导入 / 多规格编辑 / 真实浏览器执行 / 本机记录</text>
+    <g transform="translate(64 345)" font-size="14" font-weight="500">
+      <rect width="110" height="34" rx="17" fill="#2a4165"/><text x="55" y="23" text-anchor="middle" fill="#e2eafb">v0.1.45</text>
+      <rect x="122" width="192" height="34" rx="17" fill="#2a4165"/><text x="218" y="23" text-anchor="middle" fill="#e2eafb">Windows · macOS</text>
+      <rect x="326" width="112" height="34" rx="17" fill="#254c48"/><text x="382" y="23" text-anchor="middle" fill="#9ce7c1">草稿模式</text>
+    </g>
+    <g transform="translate(788 79)">
+      <rect x="0" y="8" width="582" height="316" rx="16" fill="#090f20" opacity=".3"/>
+      <rect width="582" height="316" rx="16" fill="#f5f7fc"/>
+      <path d="M16 0H566Q582 0 582 16V42H0V16Q0 0 16 0" fill="#e7ecf6"/>
+      <circle cx="21" cy="21" r="4" fill="#ef9390"/><circle cx="37" cy="21" r="4" fill="#efcf81"/><circle cx="53" cy="21" r="4" fill="#87c8aa"/>
+      <text x="291" y="26" fill="#697b98" font-size="11" text-anchor="middle" letter-spacing="1">资料 → 核对 → 草稿</text>
+      <rect x="20" y="61" width="124" height="236" rx="10" fill="#e9eef8"/>
+      <rect x="33" y="79" width="30" height="30" rx="8" fill="#3154bd"/>
+      <path d="M42 89H54M42 94H54M42 99H50" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+      <text x="33" y="135" fill="#30405d" font-size="13" font-weight="600">工作空间</text>
+      <rect x="28" y="150" width="108" height="32" rx="6" fill="#d3dffa"/>
+      <text x="42" y="171" fill="#3154bd" font-size="12" font-weight="600">商品资料</text>
+      <text x="42" y="205" fill="#77859c" font-size="12">店铺管理</text>
+      <text x="42" y="238" fill="#77859c" font-size="12">执行记录</text>
+      <circle cx="40" cy="275" r="3" fill="#2b936d"/><text x="50" y="279" fill="#77859c" font-size="10">本机工作空间</text>
+      <text x="164" y="82" fill="#283851" font-size="17" font-weight="650">一份 Excel，准备好一件商品</text>
+      <text x="164" y="106" fill="#8491a7" font-size="11">商品字段 · 价格库存 · 内嵌图片</text>
+      <g transform="translate(164 124)">
+        <rect width="396" height="96" rx="8" fill="#fff" stroke="#dce3ef"/>
+        <rect x="14" y="15" width="46" height="46" rx="10" fill="#ecf2ff"/>
+        <path d="M26 26H47V48H26ZM26 33H47M33 33V48M40 33V48M26 40H47" fill="none" stroke="#5b79cd" stroke-width="1.5"/>
+        <text x="74" y="30" fill="#36455f" font-size="13" font-weight="600">多规格商品</text>
+        <text x="74" y="51" fill="#8592a6" font-size="11">规格组合、价格与库存逐行核对</text>
+        <rect x="74" y="64" width="80" height="20" rx="10" fill="#edf7f1"/>
+        <text x="114" y="78" fill="#368467" font-size="10" text-anchor="middle">资料已就绪</text>
+        <path d="M356 30l6 6 10-12" fill="none" stroke="#3c9d7a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+      <g transform="translate(164 236)">
+        <rect width="118" height="40" rx="7" fill="#fff" stroke="#dce3ef"/><text x="59" y="25" text-anchor="middle" fill="#657693" font-size="12">01 导入资料</text>
+        <path d="M125 20h10m-4-4 4 4-4 4" fill="none" stroke="#a1aec2"/>
+        <rect x="139" width="118" height="40" rx="7" fill="#fff" stroke="#dce3ef"/><text x="198" y="25" text-anchor="middle" fill="#657693" font-size="12">02 核对规格</text>
+        <path d="M264 20h10m-4-4 4 4-4 4" fill="none" stroke="#a1aec2"/>
+        <rect x="278" width="118" height="40" rx="7" fill="#3154bd"/><text x="337" y="25" text-anchor="middle" fill="#fff" font-size="12">03 保存草稿</text>
+      </g>
+    </g>
+  </g>
+</svg>
