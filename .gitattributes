@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.xlsx binary
+*.zip binary
+*.exe binary
+resources/bridge-runtime/** binary
