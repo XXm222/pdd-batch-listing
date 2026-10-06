@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="docs/assets/readme-banner.svg" alt="商品运营台：从 Excel 商品资料到拼多多后台草稿的桌面工作台" width="100%">
+<img src="docs/assets/readme-banner.svg" alt="拼多多商品批量上架助手：从 Excel 商品资料到拼多多后台草稿的桌面工作台" width="100%">
 
-# 商品运营台
+# 拼多多商品批量上架助手
 
 **从一份 Excel 开始，完成商品整理、规格核对与后台草稿保存。**
 
-[下载安装](https://github.com/XXm222/goods-workspace/releases/tag/v0.1.45) · [使用流程](#使用流程) · [开发运行](#开发运行) · [文档导航](#文档导航)
+[下载安装](https://github.com/XXm222/pinduoduo-product-batch-publisher/releases/tag/v0.1.45) · [使用流程](#使用流程) · [开发运行](#开发运行) · [文档导航](#文档导航)
 
 <sub>v0.1.45 · Windows / macOS · 拼多多草稿 · 源码公开 / 商用需许可</sub>
 
@@ -14,7 +14,7 @@
 
 ---
 
-面向电商运营的桌面工作台。将商品字段、规格、价格库存和图片集中在一个 Excel 中，在 App 内核对并保存，再通过已登录的真实浏览器填写拼多多商品页。保存完成后重新打开草稿核对，执行过程与结果留在本机。
+面向拼多多运营的商品批量上架助手。将商品字段、规格、价格库存和图片集中在一个 Excel 中，在 App 内核对并保存，再通过已登录的真实浏览器填写拼多多商品页。保存完成后重新打开草稿核对，执行过程与结果留在本机。
 
 > 当前业务范围为**填写并保存草稿**。商品正式发布由运营在商家后台完成。
 
@@ -22,14 +22,14 @@
 
 | 平台 | 获取方式 | 当前状态 |
 | --- | --- | --- |
-| **Windows x64** | [下载 Setup 安装包](https://github.com/XXm222/goods-workspace/releases/download/v0.1.45/GoodsWorkspace-0.1.45-Windows-x64-Setup.exe) | 0.1.45 已打包，可选择安装目录；本版尚未在虚拟机安装 |
+| **Windows x64** | [下载 Setup 安装包](https://github.com/XXm222/pinduoduo-product-batch-publisher/releases/download/v0.1.45/GoodsWorkspace-0.1.45-Windows-x64-Setup.exe) | 0.1.45 已打包，可选择安装目录；本版尚未在虚拟机安装 |
 | **macOS · Apple Silicon** | 内部 App 交付，或按下方命令构建 | 0.1.45 已在本机实际运行；尚未完成 Developer ID 签名与公证 |
 
-安装包内置运行时，使用时无需安装 Node.js 或 Python。安装包与源码可公开下载，使用须遵守下方许可说明。
+现有 0.1.45 安装包内的应用名称仍为“商品运营台”。安装包内置运行时，使用时无需安装 Node.js 或 Python。安装包与源码可公开下载，使用须遵守下方许可说明。
 
 **首次使用：** 打开左下角的浏览器入口，按教程安装并连接 Kimi 浏览器扩展。Excel 导入与本机资料整理可以独立使用；执行后台任务前需确认浏览器连接与目标店铺登录状态。
 
-[查看发布说明与 SHA256](https://github.com/XXm222/goods-workspace/releases/tag/v0.1.45) · [浏览器扩展安装指南](运营资料/浏览器扩展安装指南.html)
+[查看发布说明与 SHA256](https://github.com/XXm222/pinduoduo-product-batch-publisher/releases/tag/v0.1.45) · [浏览器扩展安装指南](运营资料/浏览器扩展安装指南.html)
 
 ## 能做什么
 
@@ -109,7 +109,7 @@
 | 经营店铺、盈利业务、公司内部业务、客户项目 | 事先取得商业授权 |
 | 收费服务、软件销售或商业集成分发 | 事先取得商业授权 |
 
-免费下载安装不等于可以免费商用。需要商业授权，请 [提交授权申请](https://github.com/XXm222/goods-workspace/issues/new)，说明使用主体、用途和分发方式，授权以权利人书面许可为准。
+免费下载安装不等于可以免费商用。需要商业授权，请 [提交授权申请](https://github.com/XXm222/pinduoduo-product-batch-publisher/issues/new)，说明使用主体、用途和分发方式，授权以权利人书面许可为准。
 
 由于包含非商业限制，本项目属于**源码公开（source available）**。第三方依赖、浏览器扩展与桥接程序适用各自许可；本项目许可不授予第三方商标或软件权利。
 
