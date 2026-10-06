@@ -8,7 +8,7 @@
 
 [下载安装](https://github.com/XXm222/goods-workspace/releases/tag/v0.1.45) · [使用流程](#使用流程) · [开发运行](#开发运行) · [文档导航](#文档导航)
 
-<sub>v0.1.45 · Windows / macOS · 拼多多草稿 · 私有仓库 / 闭源软件</sub>
+<sub>v0.1.45 · Windows / macOS · 拼多多草稿 · 源码公开 / 商用需许可</sub>
 
 </div>
 
@@ -25,7 +25,7 @@
 | **Windows x64** | [下载 Setup 安装包](https://github.com/XXm222/goods-workspace/releases/download/v0.1.45/GoodsWorkspace-0.1.45-Windows-x64-Setup.exe) | 0.1.45 已打包，可选择安装目录；本版尚未在虚拟机安装 |
 | **macOS · Apple Silicon** | 内部 App 交付，或按下方命令构建 | 0.1.45 已在本机实际运行；尚未完成 Developer ID 签名与公证 |
 
-安装包内置运行时，使用时无需安装 Node.js 或 Python。私有仓库的下载链接需要登录有访问权限的 GitHub 账号。
+安装包内置运行时，使用时无需安装 Node.js 或 Python。安装包与源码可公开下载，使用须遵守下方许可说明。
 
 **首次使用：** 打开左下角的浏览器入口，按教程安装并连接 Kimi 浏览器扩展。Excel 导入与本机资料整理可以独立使用；执行后台任务前需确认浏览器连接与目标店铺登录状态。
 
@@ -99,6 +99,20 @@
 
 </details>
 
+## 使用许可与商业授权
+
+本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE)，**允许非商业使用、修改与分发，未经书面许可不得商用**。完整条款及版权声明见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。
+
+| 使用场景 | 授权要求 |
+| --- | --- |
+| 非商业学习、研究、实验 | 按许可证使用，保留许可及版权声明 |
+| 经营店铺、盈利业务、公司内部业务、客户项目 | 事先取得商业授权 |
+| 收费服务、软件销售或商业集成分发 | 事先取得商业授权 |
+
+免费下载安装不等于可以免费商用。需要商业授权，请 [提交授权申请](https://github.com/XXm222/goods-workspace/issues/new)，说明使用主体、用途和分发方式，授权以权利人书面许可为准。
+
+由于包含非商业限制，本项目属于**源码公开（source available）**。第三方依赖、浏览器扩展与桥接程序适用各自许可；本项目许可不授予第三方商标或软件权利。
+
 ## 开发运行
 
 技术栈：**Electron 44 · React 19 · TypeScript · Vite · SQLite / SQL.js**。使用 Node.js 24.19.0 与 pnpm 11.19.0，依赖版本由锁文件固定。
@@ -158,6 +172,6 @@ docs/assets/    项目首页视觉资源
 
 **本机保存资料 · 真实浏览器执行 · 草稿结果可核对**
 
-<sub>私有仓库 · 闭源软件 · 专有代码保留所有权利，见 <a href="LICENSE">LICENSE</a><br>第三方依赖、扩展与桥接程序适用各自许可。</sub>
+<sub>源码公开 · 非商业使用 · 商用需书面许可，见 <a href="LICENSE">LICENSE</a> 与 <a href="NOTICE">NOTICE</a><br>第三方依赖、扩展与桥接程序适用各自许可。</sub>
 
 </div>
