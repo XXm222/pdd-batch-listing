@@ -1,3 +1,4 @@
+import { recordError, writeDiagnostic } from './error-diagnostics';
 import {
   app,
   BrowserWindow,
@@ -75,24 +76,20 @@ const assetId = /^[a-f0-9]{64}$/;
 async function measureLocal<T>(name: string, work: () => Promise<T>): Promise<T> {
   const start = performance.now(),
     startedAt = new Date().toISOString();
-  let status = 'done';
+  let status: 'done' | 'failed' = 'done';
   try {
     return await work();
   } catch (error) {
     status = 'failed';
     throw error;
   } finally {
-    fs.appendFileSync(
-      path.join(app.getPath('userData'), 'operation-timings.jsonl'),
-      JSON.stringify({
-        name,
-        startedAt,
-        endedAt: new Date().toISOString(),
-        durationMs: Math.round(performance.now() - start),
-        status,
-      }) + '\n',
-      { mode: 0o600 },
-    );
+    writeDiagnostic(path.join(app.getPath('userData'), 'operation-timings.jsonl'), {
+      name,
+      startedAt,
+      endedAt: new Date().toISOString(),
+      durationMs: Math.round(performance.now() - start),
+      status,
+    });
   }
 }
 
@@ -148,9 +145,9 @@ function workerImport(data: {
       void worker.terminate();
       message.ok ? resolve(message.data) : reject(new Error(message.error));
     });
-    worker.once('error', () => {
+    worker.once('error', (error) => {
       clearTimeout(timer);
-      reject(new Error('资料识别线程失败，请检查文件后重试'));
+      reject(new Error('资料识别线程失败，请检查文件后重试', { cause: error }));
     });
     worker.once('exit', (code) => {
       if (code !== 0) {
@@ -172,6 +169,11 @@ function handler(name: string, fn: (input: any) => any, mutation = false) {
       try {
         return { ok: true, data: await fn(input) };
       } catch (error) {
+        recordError(
+          path.join(app.getPath('userData'), 'operation-timings.jsonl'),
+          `IPC:${name}`,
+          error,
+        );
         return { ok: false, error: error instanceof Error ? error.message : '操作失败，请重试' };
       }
     };
@@ -244,11 +246,17 @@ else {
         store,
         app.getPath('userData'),
         pdd,
-        () =>
+        (error) => {
+          recordError(
+            path.join(app.getPath('userData'), 'operation-timings.jsonl'),
+            '任务状态保存失败',
+            error,
+          );
           dialog.showErrorBox(
             '执行已停止',
             '本机任务状态无法保存，请保留应用数据并检查磁盘空间或文件权限。已尝试保存的商品须先核对原草稿。',
-          ),
+          );
+        },
         (id, remaining) =>
           agent.handleFailure(
             id,

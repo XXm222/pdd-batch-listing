@@ -150,8 +150,8 @@ function imageExtension(file: string, label: string) {
     } finally {
       fs.closeSync(handle);
     }
-  } catch {
-    throw new Error(`无法读取本机图片，未上传：${label}`);
+  } catch (error) {
+    throw new Error(`无法读取本机图片，未上传：${label}`, { cause: error });
   }
   if (length >= 8 && head.subarray(0, 8).equals(PNG_SIGNATURE)) return '.png';
   if (length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return '.jpg';

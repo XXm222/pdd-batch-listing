@@ -10,5 +10,12 @@
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["electron", "src/types.ts", "src/domain.ts", "src/task-progress.ts"]
+  "include": [
+    "electron",
+    "src/types.ts",
+    "src/domain.ts",
+    "src/task-progress.ts",
+    "src/product-list.ts",
+    "src/workspace-state.ts"
+  ]
 }

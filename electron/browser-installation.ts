@@ -47,13 +47,18 @@ export async function exportBrowserExtension(resourcesRoot: string, documents: s
       );
       return { folder, zip: zipPath };
     }
-  } catch {}
+  } catch {
+    // Missing, incomplete or modified exports are preserved; create a new copy below.
+  }
   await fs.mkdir(parent, { recursive: true });
   // Preserve any incomplete or user-modified export; prepare a fresh permanent folder beside it.
   try {
     await fs.access(directory);
     directory += `-${randomUUID().slice(0, 8)}`;
-  } catch {}
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+      throw new Error('无法访问浏览器扩展目录，请检查文件权限', { cause: error });
+  }
   const folder = path.join(directory, 'Kimi浏览器扩展');
   const zipPath = path.join(directory, 'Kimi浏览器扩展.zip');
   const staging = await fs.mkdtemp(path.join(parent, '.install-'));

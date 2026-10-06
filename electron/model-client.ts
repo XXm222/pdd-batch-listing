@@ -120,9 +120,10 @@ export class ModelClient {
           ...(tools ? { tools, tool_choice: 'auto' } : {}),
         }),
       });
-    } catch {
+    } catch (error) {
       throw new Error(
         stop.aborted ? '模型请求超时，请稍后重试' : '无法连接模型接口，请检查地址与网络',
+        { cause: error },
       );
     }
     if (!response.ok) {
@@ -151,7 +152,7 @@ export class ModelClient {
         chunks.push(value);
       }
     } catch (e) {
-      if (stop.aborted) throw new Error('模型响应超时，请稍后重试');
+      if (stop.aborted) throw new Error('模型响应超时，请稍后重试', { cause: e });
       throw e;
     } finally {
       reader.releaseLock();
@@ -159,8 +160,8 @@ export class ModelClient {
     let data: any;
     try {
       data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    } catch {
-      throw new Error('模型接口返回了无法识别的内容');
+    } catch (error) {
+      throw new Error('模型接口返回了无法识别的内容', { cause: error });
     }
     const m = data?.choices?.[0]?.message;
     const content =

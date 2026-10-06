@@ -22,6 +22,7 @@ function walk(directory) {
 walk('dist');
 walk('dist-electron');
 walk('resources');
+files.push('LICENSE', 'NOTICE');
 for (const file of files)
   assert.ok(
     asar.extractFile(archive, file.replaceAll(path.sep, '/')).equals(fs.readFileSync(file)),
@@ -29,7 +30,15 @@ for (const file of files)
   );
 const built = JSON.parse(asar.extractFile(archive, 'package.json').toString());
 const source = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-for (const key of ['name', 'productName', 'version', 'main', 'dependencies', 'packageManager'])
+for (const key of [
+  'name',
+  'productName',
+  'version',
+  'main',
+  'dependencies',
+  'packageManager',
+  'license',
+])
   assert.deepEqual(built[key], source[key]);
 assert.ok(
   fs

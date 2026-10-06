@@ -1,7 +1,7 @@
 {
   "name": "goods-workspace",
   "productName": "商品运营台",
-  "version": "0.1.45",
+  "version": "0.1.46",
   "private": true,
   "description": "商品资料导入与店铺草稿工作台",
   "author": "商品运营台项目",
@@ -43,13 +43,15 @@
     "appId": "com.goodsworkspace.desktop",
     "productName": "商品运营台",
     "directories": {
-      "output": "release/0.1.45"
+      "output": "release/0.1.46"
     },
     "files": [
       "dist/**",
       "dist-electron/**",
       "resources/**",
-      "package.json"
+      "package.json",
+      "LICENSE",
+      "NOTICE"
     ],
     "mac": {
       "target": "dmg",
@@ -75,5 +77,6 @@
       "resources/**"
     ]
   },
-  "packageManager": "pnpm@11.19.0"
+  "packageManager": "pnpm@11.19.0",
+  "license": "PolyForm-Noncommercial-1.0.0"
 }
