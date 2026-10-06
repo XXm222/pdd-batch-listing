@@ -107,3 +107,17 @@ test('only blank saved stock with a real control and a captured server zero can 
   await a.verifySkus(p, 'saved');
   await assert.rejects(a.verifySkus(p, 'form'), /空白/);
 });
+
+test('malformed captured bodies never establish zero stock or throw a shape error', () => {
+  for (const body of [null, {}, { success: true, result: null }, { success: true, result: [] }])
+    assert.deepEqual(confirmedDraftZeroStocks(body, task, product), []);
+  for (const mutate of [
+    (b) => (b.result.sku[0] = null),
+    (b) => (b.result.sku[0].spec[0] = null),
+    (b) => (b.result.sku[0].spec = 'invalid'),
+  ]) {
+    const body = response();
+    mutate(body);
+    assert.deepEqual(confirmedDraftZeroStocks(body, task, product), []);
+  }
+});

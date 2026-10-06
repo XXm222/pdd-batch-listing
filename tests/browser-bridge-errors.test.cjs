@@ -12,7 +12,7 @@ async function withFetch(implementation, work) {
   const original = global.fetch;
   global.fetch = implementation;
   try {
-    await work(new BrowserBridge());
+    await work(new BrowserBridge('https://mms.pinduoduo.com/home/'));
   } finally {
     global.fetch = original;
   }
@@ -191,8 +191,8 @@ test('separate App adapters do not inherit old sessions while each adapter keeps
     return Response.json({ ok: true, data: {} });
   };
   try {
-    const first = new BrowserBridge(),
-      second = new BrowserBridge();
+    const first = new BrowserBridge('https://mms.pinduoduo.com/home/'),
+      second = new BrowserBridge('https://mms.pinduoduo.com/home/');
     await first.call('snapshot');
     await first.call('snapshot');
     await second.call('snapshot');
@@ -254,7 +254,7 @@ test('a loose host match cannot select a non-PDD origin for login', async () =>
   }));
 
 test('normal fill relies on extension pre-focus and never focuses a second time after setting the value', async () => {
-  const bridge = new BrowserBridge(),
+  const bridge = new BrowserBridge('https://mms.pinduoduo.com/home/'),
     actions = [];
   const input = {
     value: '',
@@ -278,7 +278,7 @@ test('normal fill relies on extension pre-focus and never focuses a second time 
 });
 
 function keyboardFixture(options = {}) {
-  const bridge = new BrowserBridge(),
+  const bridge = new BrowserBridge('https://mms.pinduoduo.com/home/'),
     actions = [],
     attrs = new Map(),
     listeners = new Map();
@@ -670,7 +670,7 @@ test('byte upload fallback keeps actual PNG/JPEG bytes, filename extensions and 
     second = path.join(directory, 'sku-gray.png');
   fs.writeFileSync(first, png);
   fs.writeFileSync(second, jpeg);
-  const bridge = new BrowserBridge(),
+  const bridge = new BrowserBridge('https://mms.pinduoduo.com/home/'),
     changes = [],
     input = {
       dispatchEvent(event) {
@@ -728,4 +728,43 @@ test('byte upload fallback keeps actual PNG/JPEG bytes, filename extensions and 
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('connection uses the injected platform landing page and never accepts another origin', async () => {
+  const originalStart = BridgeSetup.prototype.start;
+  BridgeSetup.prototype.start = async () => ({
+    state: 'ready',
+    httpAddress: 'http://127.0.0.1:10086',
+  });
+  try {
+    const bridge = new BrowserBridge('https://shop.example/workbench');
+    const calls = [];
+    bridge.call = async (action, args) => {
+      calls.push({ action, args });
+      if (action === 'find_tab') throw new Error('find_tab: no tab matching target');
+      return { success: true, tabId: 17, url: 'https://shop.example/workbench' };
+    };
+    await bridge.connect();
+    assert.equal(calls.at(-1).args.url, 'https://shop.example/workbench');
+    assert.ok(calls.slice(0, -1).every((c) => c.args.url === 'https://shop.example'));
+    bridge.call = async () => ({
+      success: true,
+      tabId: 17,
+      url: 'https://other.example/workbench',
+    });
+    await assert.rejects(bridge.connect(), (e) => e.code === 'browser_unavailable');
+    assert.throws(() => new BrowserBridge('http://shop.example'), /HTTPS/);
+    assert.throws(() => new BrowserBridge('https://user:password@shop.example'), /凭据/);
+  } finally {
+    BridgeSetup.prototype.start = originalStart;
+  }
+});
+
+test('evaluate refuses malformed transport envelopes instead of trusting the generic result type', async () => {
+  for (const data of [null, false, 'unexpected', []])
+    await withFetch(
+      async () => ({ ok: true, json: async () => ({ ok: true, data }) }),
+      (bridge) =>
+        assert.rejects(bridge.eval('document.title'), (e) => e.code === 'platform_changed'),
+    );
 });

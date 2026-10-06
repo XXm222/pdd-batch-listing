@@ -1,3 +1,13 @@
+import {
+  readSkuTable,
+  readRemoteImages,
+  readSavedSettings,
+  parseSkuTable,
+  parseRemoteImages,
+  parseSavedSettings,
+  isRecord,
+  type SkuTable,
+} from './pdd-page-scripts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { LOGIN_STATE, PddLogin, shopIdentityMessage } from './pdd-login';
@@ -35,28 +45,14 @@ type SpecRowState = {
     pressed: string | null;
   }[];
 };
-type SkuTableCell = {
-  text: string;
-  value: string;
-  selector: string;
-  rowSpan: number;
-  colSpan: number;
-  control?: {
-    type: string;
-    placeholder: string;
-    valueAttribute: string | null;
-    disabled: boolean;
-    readOnly: boolean;
-  };
-};
-type SkuTable = { headers: string[]; rows: { index: number; cells: SkuTableCell[] }[] };
 type SkuImageTarget = { image: string; combinations: string[] };
 type SkuImageState = { remoteUrl: string; inputSelector: string | null };
 // PDD renders a saved zero quantity_delta as an empty stock input. Only the
 // editor's captured response for this exact commit may establish that zero.
-export function confirmedDraftZeroStocks(body: any, t: Task, p: Product): number[] {
-  const d = body?.result,
-    commitId = t.formUrl ? new URL(t.formUrl).searchParams.get('id') : null;
+export function confirmedDraftZeroStocks(body: unknown, t: Task, p: Product): number[] {
+  if (!isRecord(body) || !isRecord(body.result)) return [];
+  const d = body.result;
+  const commitId = t.formUrl ? new URL(t.formUrl).searchParams.get('id') : null;
   if (
     !t.saveAttemptedAt ||
     body?.success !== true ||
@@ -69,19 +65,26 @@ export function confirmedDraftZeroStocks(body: any, t: Task, p: Product): number
     d.sku.length !== p.skus.length
   )
     return [];
-  const used = new Set(),
+  const capturedSkus: unknown[] = d.sku;
+  const used = new Set<Record<string, unknown>>(),
     zeros: number[] = [];
   for (const [i, expected] of p.skus.entries()) {
-    const matches = d.sku.filter(
-      (s: any) =>
-        Array.isArray(s.spec) &&
-        s.spec.length === (expected.options || []).length &&
+    const matches = capturedSkus.filter((candidate): candidate is Record<string, unknown> => {
+      if (!isRecord(candidate) || !Array.isArray(candidate.spec)) return false;
+      const specs: unknown[] = candidate.spec;
+      return (
+        specs.length === (expected.options || []).length &&
         (expected.options || []).every(
-          (o) =>
-            s.spec.filter((v: any) => v.parent_name === o.name && v.spec_name === o.value)
-              .length === 1,
-        ),
-    );
+          (option) =>
+            specs.filter(
+              (spec) =>
+                isRecord(spec) &&
+                spec.parent_name === option.name &&
+                spec.spec_name === option.value,
+            ).length === 1,
+        )
+      );
+    });
     if (matches.length !== 1 || used.has(matches[0])) return [];
     const s = matches[0];
     used.add(s);
@@ -155,7 +158,7 @@ function imageExtension(file: string, label: string) {
   throw new Error(`无法确认图片格式，未上传：${label}`);
 }
 export class PddAdapter {
-  private bridge = new BrowserBridge();
+  private bridge = new BrowserBridge('https://mms.pinduoduo.com/home/');
   private context!: ExecutionContext;
   private task!: Task;
   private captureSavedStock = false;
@@ -1361,31 +1364,8 @@ export class PddAdapter {
       return rows[0];
     });
   }
-  private table() {
-    return this.bridge.eval<SkuTable>(`(() => {
-    const tables=[...document.querySelectorAll('table')].filter(e=>e.innerText.includes('拼单价')&&e.innerText.includes('库存'));
-    if(tables.length!==1)throw Error('价格库存表无法唯一定位');const t=tables[0];t.setAttribute('data-goods-table','sku');
-    const expand=(rows,bodyIndex)=>{
-      const grid=Array.from({length:rows.length},()=>[]);
-      rows.forEach((row,r)=>{let col=0;[...row.cells].forEach((cell,physicalCol)=>{
-        while(grid[r][col])col++;
-        const rowSpan=cell.rowSpan===0?rows.length-r:cell.rowSpan||1,colSpan=cell.colSpan||1;
-        if(rowSpan>rows.length-r)throw Error('价格库存表合并单元格超出行范围');
-        const input=cell.querySelector('input:not([type=file])');
-        const item={text:cell.innerText.trim(),value:input?.value??'',rowSpan,colSpan,
-          ...(input?{control:{type:input.type||'',placeholder:(input.placeholder||'').slice(0,80),valueAttribute:input.getAttribute?.('value')??null,disabled:!!input.disabled,readOnly:!!input.readOnly}}:{}),
-          selector:bodyIndex<0?'':'table[data-goods-table="sku"] > tbody:nth-of-type('+(bodyIndex+1)+') > tr:nth-child('+(r+1)+') > :is(td,th):nth-child('+(physicalCol+1)+')'};
-        for(let y=r;y<r+rowSpan;y++)for(let x=col;x<col+colSpan;x++){if(grid[y][x])throw Error('价格库存表合并单元格重叠');grid[y][x]=item;}
-        col+=colSpan;
-      });});return grid;
-    };
-    const head=expand([...(t.tHead?.rows||[])],-1),headers=(head.at(-1)||[]).map(cell=>cell.text.replace(/\\*/g,'').trim());
-    if(!headers.length)throw Error('价格库存表未读取到表头');
-    const rows=[...t.tBodies].flatMap((body,index)=>expand([...body.rows],index)).map((cells,index)=>{
-      if(cells.length!==headers.length||Array.from({length:headers.length},(_,i)=>!cells[i]).some(Boolean))throw Error('价格库存表列数不完整');
-      return {index,cells};
-    });return {headers,rows};
-  })()`);
+  private async table() {
+    return parseSkuTable(await this.bridge.eval<unknown>(`(${readSkuTable.toString()})()`));
   }
   private async discount(value: string) {
     let state = await this.discountState(value);
@@ -1534,10 +1514,8 @@ export class PddAdapter {
     });
     this.patch(t, { uploadManifest: { goodsId: t.goodsId!, ...(await this.remoteImages()) } });
   }
-  private remoteImages() {
-    return this.bridge.eval<{ main: string[]; detail: string[] }>(
-      `(() => ({main:[...document.querySelector('[id="basic.carousel_gallery"]').querySelectorAll('[style]')].map(e=>e.style.backgroundImage.match(/^url\\(["']?(https:[^"')]+)["']?\\)$/)?.[1]).filter(Boolean),detail:[...document.querySelector('#detail_pic .decoration-operate').querySelectorAll('img')].map(e=>e.getAttribute('src')||'').filter(s=>/^https:\\/\\//.test(s))}))()`,
-    );
+  private async remoteImages() {
+    return parseRemoteImages(await this.bridge.eval<unknown>(`(${readRemoteImages.toString()})()`));
   }
   private async capturedZeroStocks(p: Product) {
     if (!this.captureSavedStock) return new Set<number>();
@@ -1552,17 +1530,19 @@ export class PddAdapter {
         request.status !== 200
       )
         continue;
-      const detail = await this.bridge.call('network', {
+      const detail = await this.bridge.call<unknown>('network', {
         cmd: 'detail',
         requestId: request.requestId,
       });
-      const input =
+      if (!isRecord(detail)) continue;
+      const input: unknown =
         typeof detail.requestBody === 'string'
           ? JSON.parse(detail.requestBody)
           : detail.requestBody;
       if (
-        String(input?.goods_commit_id) !== commitId ||
-        String(input?.goods_id) !== this.task.goodsId
+        !isRecord(input) ||
+        String(input.goods_commit_id) !== commitId ||
+        String(input.goods_id) !== this.task.goodsId
       )
         continue;
       const body = typeof detail.body === 'string' ? JSON.parse(detail.body) : detail.body;
@@ -1761,8 +1741,8 @@ export class PddAdapter {
       `轮播图 ${mainCount}/${p.main.length} 张、详情图 ${detailCount}/${p.detail.length} 张`,
       stage,
     );
-    const values = await this.bridge.eval<{ reference: string; shipping: string; freight: string }>(
-      `(() => ({reference:document.querySelector('[data-tracking-click-viewid="goods_advice_price"]')?.value,shipping:document.querySelector('[id="service.shipment_limit_second"] label[data-checked="true"]')?.innerText.trim(),freight:document.querySelector('[id="service.cost_template_id"]')?.innerText.trim()||document.querySelector('[id="service.is_default_template_id"] label[data-checked="true"]')?.innerText.replace('推荐','').trim()}))()`,
+    const values = parseSavedSettings(
+      await this.bridge.eval<unknown>(`(${readSavedSettings.toString()})()`),
     );
     const discount = await this.discountState(p.discount);
     this.check(

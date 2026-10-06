@@ -20,7 +20,6 @@ const connectionError = () =>
     'browser_unavailable',
     '浏览器连接已断开。请打开左下角“浏览器连接 · 安装教程”，确认浏览器已打开、扩展已启用并已连接，再继续任务。',
   );
-const PDD_ORIGIN = 'https://mms.pinduoduo.com';
 type TabResult = { success: boolean; url: string; tabId: number; borrowed?: boolean };
 const missingTab = (error: unknown) =>
   error instanceof Error &&
@@ -30,11 +29,18 @@ const closedSessionTab = (error: unknown) =>
   (/^session "goods-workspace(?:-[a-f0-9-]+)?": current tab \d+ was closed;/i.test(error.message) ||
     /^No tab with given id \d+\.?$/i.test(error.message));
 export class BrowserBridge {
+  private readonly origin: string;
+  constructor(private readonly startUrl: string) {
+    const url = new URL(startUrl);
+    if (url.protocol !== 'https:' || url.username || url.password)
+      throw new Error('后台连接地址须使用不含凭据的 HTTPS 地址');
+    this.origin = url.origin;
+  }
   private url = 'http://127.0.0.1:10086';
   // The daemon outlives browser/App restarts. Keep one session for this adapter's
   // entire queue, without inheriting old tab IDs from an earlier App process.
   private readonly session = `goods-workspace-${randomUUID()}`;
-  async call<T = any>(
+  async call<T = unknown>(
     action: string,
     args: Record<string, unknown> = {},
     timeoutMs = 45000,
@@ -92,35 +98,35 @@ export class BrowserBridge {
     // The extension may be connected in a different browser from the OS default.
     // Select/create the tab through that same connection; openExternal + active:true
     // can open Edge while every subsequent command is sent to Chrome.
-    for (const args of [{ url: PDD_ORIGIN }, { url: PDD_ORIGIN, active: true }]) {
+    for (const args of [{ url: this.origin }, { url: this.origin, active: true }]) {
       try {
-        this.checkPddTab(await this.call<TabResult>('find_tab', args));
+        this.checkTab(await this.call<TabResult>('find_tab', args));
         return;
       } catch (error) {
         if (closedSessionTab(error)) break;
         if (!missingTab(error)) throw error;
       }
     }
-    this.checkPddTab(
+    this.checkTab(
       await this.call<TabResult>('navigate', {
-        url: `${PDD_ORIGIN}/home/`,
+        url: this.startUrl,
         newTab: true,
         group_title: '商品运营台',
       }),
     );
   }
-  private checkPddTab(tab: TabResult) {
+  private checkTab(tab: TabResult) {
     let trusted = false;
     try {
       trusted =
         tab?.success === true &&
         Number.isInteger(tab.tabId) &&
-        new URL(tab.url).origin === PDD_ORIGIN;
+        new URL(tab.url).origin === this.origin;
     } catch {}
     if (!trusted)
       throw new ExecutionError(
         'browser_unavailable',
-        '未能在已连接的浏览器中打开拼多多后台，请检查浏览器连接后继续。',
+        '未能在已连接的浏览器中打开目标商家后台，请检查浏览器连接后继续。',
       );
   }
   snapshot() {
@@ -138,8 +144,15 @@ export class BrowserBridge {
       await this.call('cdp', { method: 'Page.handleJavaScriptDialog', params: { accept: true } });
     }
   }
-  async eval<T = any>(code: string, timeoutMs = 45000): Promise<T> {
-    return (await this.call('evaluate', { code }, timeoutMs)).value as T;
+  async eval<T = unknown>(code: string, timeoutMs = 45000): Promise<T> {
+    const result = await this.call<unknown>('evaluate', { code }, timeoutMs);
+    if (!result || typeof result !== 'object' || Array.isArray(result))
+      throw new ExecutionError(
+        'platform_changed',
+        '浏览器脚本返回结构不正确，请核对原页面',
+        'inspect_form',
+      );
+    return (result as { value?: unknown }).value as T;
   }
   async wait<T>(
     check: () => Promise<T | false | null | undefined>,
