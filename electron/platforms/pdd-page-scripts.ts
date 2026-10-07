@@ -18,8 +18,51 @@ export type SkuTable = { headers: string[]; rows: { index: number; cells: SkuTab
 export type RemoteImages = { main: string[]; detail: string[] };
 export type SavedSettings = { reference?: string; shipping?: string; freight?: string };
 
+export function pddCategoryLeaf(category: string): string {
+  return (
+    category
+      .split(/[>＞]+/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .at(-1) || ''
+  );
+}
+
 // These functions are serialized into the page. Keep them self-contained:
 // imports and module-local helpers are unavailable in the browser context.
+export function readPddCategoryLeaf(selectionPage = false): string {
+  const paths = [
+    ...document.querySelectorAll<HTMLElement>(
+      selectionPage ? '.bottom-container-v2 .cate-text' : '.category-area .sort-name',
+    ),
+  ].filter((e) => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden');
+  return paths.length === 1
+    ? paths[0].innerText
+        .split(/[>＞]+/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .at(-1) || ''
+    : '';
+}
+
+export function clickPddCategoryResult(leaf: string): { count: number; path?: string } {
+  const matches = [
+    ...document.querySelectorAll<HTMLElement>('[data-testid="beast-core-search-panel"] li'),
+  ].filter(
+    (e) =>
+      e.getClientRects().length &&
+      getComputedStyle(e).visibility !== 'hidden' &&
+      e.innerText
+        .split(/[>＞]+/)
+        .at(-1)
+        ?.trim() === leaf,
+  );
+  if (matches.length !== 1) return { count: matches.length };
+  const path = matches[0].innerText.trim();
+  matches[0].click();
+  return { count: 1, path };
+}
+
 export function readSkuTable(): SkuTable {
   const tables = [...document.querySelectorAll<HTMLTableElement>('table')].filter(
     (e) => e.innerText.includes('拼单价') && e.innerText.includes('库存'),
@@ -102,6 +145,45 @@ export function readRemoteImages(): RemoteImages {
     detail: [...detail.querySelectorAll('img')]
       .map((e) => e.getAttribute('src') || '')
       .filter((url) => /^https:\/\//.test(url)),
+  };
+}
+export function readImageUploadFacts(kind: 'main' | 'detail') {
+  const rootSelector = kind === 'main' ? '[id="basic.carousel_gallery"]' : '#detail_pic';
+  const roots = document.querySelectorAll<HTMLElement>(rootSelector);
+  const root = roots.length === 1 ? roots[0] : null;
+  const track = kind === 'main' ? 'carousel_img_localfile_upload' : 'detail_img_localfile_upload';
+  const trackedSelector = `input[type="file"][data-tracking-click-viewid="${track}"]:not(:disabled)`;
+  const local = root ? [...root.querySelectorAll<HTMLInputElement>(trackedSelector)] : [];
+  const generic = root
+    ? [...root.querySelectorAll<HTMLInputElement>('input[type="file"]:not(:disabled)')]
+    : [];
+  const global = [...document.querySelectorAll<HTMLInputElement>(trackedSelector)];
+  const selector =
+    local.length === 1
+      ? `${rootSelector} ${trackedSelector}`
+      : local.length === 0 && generic.length === 1
+        ? `${rootSelector} input[type="file"]:not(:disabled)`
+        : local.length === 0 && generic.length === 0 && global.length === 1
+          ? trackedSelector
+          : '';
+  const visible = (e: Element) =>
+    !!e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden';
+  return {
+    // At capacity or during upload the picker may disappear; the area remains readable.
+    available: !!root,
+    rootCount: roots.length,
+    inputCount: selector ? 1 : local.length || generic.length || global.length,
+    inputSelector: selector,
+    text: (root?.innerText || '').slice(0, 5000),
+    notices: [
+      ...document.querySelectorAll<HTMLElement>(
+        '[role=alert],[role=dialog],[class*=notice],[class*=Notice],[class*=toast],[class*=Toast]',
+      ),
+    ]
+      .filter(visible)
+      .map((e) => (e.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 300))
+      .filter((t) => /图片|图像|文件|上传/.test(t))
+      .slice(0, 20),
   };
 }
 

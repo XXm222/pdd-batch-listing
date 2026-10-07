@@ -15,6 +15,7 @@ work/
 *.sqlite-*
 *.db
 *.pem
+!resources/updates/release-public.pem
 *.key
 复制校验.json
 资料来源.md

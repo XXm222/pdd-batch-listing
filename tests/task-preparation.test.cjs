@@ -61,7 +61,12 @@ function taskFor(p, shop, overrides = {}) {
     id: randomUUID(),
     shopId: shop.id,
     shopName: shop.name,
-    shopSnapshot: { name: shop.name, account: shop.account, updatedAt: shop.updatedAt },
+    shopSnapshot: {
+      name: shop.name,
+      account: shop.account,
+      updatedAt: shop.updatedAt,
+      platform: 'pdd',
+    },
     code: p.code,
     title: p.title,
     status: 'failed',
@@ -116,11 +121,13 @@ const inputFor = ({ shop, products }) => ({
   productIds: products.map((p) => p.id),
 });
 const readTask = (store, id) => store.all('tasks').find((task) => task.id === id);
-const browserForbidden = {
+// TaskRunner 按店铺平台取适配器，这里固定返回一个禁止操作浏览器的适配器。
+const browserForbiddenAdapter = {
   execute: async () => {
     throw new Error('本文件不允许操作浏览器');
   },
 };
+const browserForbidden = () => browserForbiddenAdapter;
 
 test('成功历史即使有保存标记，也可新建；原记录完全保留，新任务不继承执行状态', async (t) => {
   const f = await fixture(t);
@@ -409,12 +416,12 @@ test('运行中的队列保护尚未开始的后续商品，暂停请求也须�
   f.store.onTaskChanged((task) => {
     if (task.id === ids[0] && task.completedAt) completed();
   });
-  const runner = new TaskRunner(f.store, f.directory, {
+  const runner = new TaskRunner(f.store, f.directory, () => ({
     execute: async (task, shop, context) => {
       await gate;
       context.patch({ status: 'succeeded' });
     },
-  });
+  }));
   runner.start(ids);
   assert.equal(runner.isActive, true);
   assert.equal(readTask(f.store, ids[1]).status, 'prepared');
@@ -463,7 +470,7 @@ test('规格错误的易读提示与完整诊断分别持久化，详情不会�
   f.store.onTaskChanged((task) => {
     if (task.id === ids[0] && task.completedAt) finish();
   });
-  const runner = new TaskRunner(f.store, f.directory, {
+  const runner = new TaskRunner(f.store, f.directory, () => ({
     execute: async () => {
       throw new ExecutionError(
         'platform_changed',
@@ -473,7 +480,7 @@ test('规格错误的易读提示与完整诊断分别持久化，详情不会�
         details,
       );
     },
-  });
+  }));
   runner.start(ids);
   await done;
   await new Promise((resolve) => setImmediate(resolve));

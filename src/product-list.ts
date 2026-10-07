@@ -1,4 +1,5 @@
-import { problems } from './domain';
+import { isTaobaoProduct, problems } from './domain';
+import { platformMeta } from './platforms';
 import type { Product } from './types';
 
 export function productList(
@@ -9,7 +10,11 @@ export function productList(
   selected: ReadonlySet<string>,
 ) {
   const query = search.trim().toLowerCase();
-  const checked = products.map((product) => ({ product, ready: !problems(product).length }));
+  const checked = products.map((product) => ({
+    product,
+    ready: !problems(product).length,
+    enabled: platformMeta(isTaobaoProduct(product) ? 'taobao' : 'pdd').enabled,
+  }));
   const visible = checked
     .filter(
       ({ product, ready }) =>
@@ -20,9 +25,11 @@ export function productList(
   const pageCount = Math.max(1, Math.ceil(visible.length / 40));
   const currentPage = Math.max(0, Math.min(page, pageCount - 1));
   const rows = visible.slice(currentPage * 40, (currentPage + 1) * 40);
-  const readyIds = new Set(checked.filter((item) => item.ready).map((item) => item.product.id));
+  const readyIds = new Set(
+    checked.filter((item) => item.ready && item.enabled).map((item) => item.product.id),
+  );
   return {
-    readyCount: readyIds.size,
+    readyCount: checked.filter((item) => item.ready).length,
     visible,
     pageCount,
     currentPage,

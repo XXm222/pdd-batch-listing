@@ -50,6 +50,12 @@ assert.ok(
     .readFileSync('运营资料/商品资料示例.xlsx')
     .equals(fs.readFileSync('resources/templates/商品资料示例.xlsx')),
 );
+// 天猫发品表单字段与拼多多不同，模板分开维护，两份都要随包发布。
+for (const name of ['淘宝商品资料模板.xlsx', '淘宝商品资料示例.xlsx']) {
+  assert.ok(
+    fs.readFileSync(`运营资料/${name}`).equals(fs.readFileSync(`resources/templates/${name}`)),
+  );
+}
 assert.ok(
   fs.existsSync(path.join(bundle, 'app.asar.unpacked/node_modules/sql.js/dist/sql-wasm.wasm')),
 );

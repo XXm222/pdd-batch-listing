@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Circle, LoaderCircle, AlertCircle, LogIn } from 'lucide-react';
 import { Modal } from './components';
+import { platformMeta } from './platforms';
 import type { Shop, ShopLoginResult } from './types';
 
 export function ShopLogin({
@@ -43,6 +44,7 @@ export function ShopLogin({
     }
   };
   const succeeded = result?.status === 'succeeded';
+  const meta = platformMeta(shop.platform);
   return (
     <Modal
       title="店铺登录与核对"
@@ -68,7 +70,7 @@ export function ShopLogin({
                 onClick={() => void run('relogin')}
               >
                 <LogIn size={15} />
-                {busy ? '正在登录…' : '退出并重新登录'}
+                {busy ? '正在登录…' : meta.draftPublishing ? '退出并重新登录' : '打开登录页登录'}
               </button>
             ) : (
               <>
@@ -98,9 +100,7 @@ export function ShopLogin({
       }
     >
       <div className="modal-body shop-login-body">
-        <p>
-          在已连接浏览器退出当前拼多多账号，自动填写此店铺保存的账号密码并点击登录。登录后核对店铺名称与子账号。
-        </p>
+        <p>{meta.loginHint}</p>
         {error ? (
           <div className="error-message" role="alert">
             {error}

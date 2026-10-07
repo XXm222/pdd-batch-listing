@@ -9,7 +9,8 @@ import {
   type ExecutionContext,
   type PlatformAdapter,
 } from './execution';
-import { problems } from '../src/domain';
+import { isTaobaoProduct, problems, requiresFreightTemplate } from '../src/domain';
+import { normalizePlatform, platformMeta, requireEnabledPlatform } from '../src/platforms';
 import type { Product, Shop, Task, StepTiming, TaskStep } from '../src/types';
 
 export function prepareTasks(
@@ -18,6 +19,9 @@ export function prepareTasks(
 ): string[] {
   const shop = store.all<Shop>('shops').find((s) => s.id === input?.shopId);
   if (!shop?.credentialsSaved) throw new Error('请先保存店铺账号密码');
+  const platform = normalizePlatform(shop.platform);
+  const meta = requireEnabledPlatform(platform);
+  if (!meta.draftPublishing) throw new Error(meta.draftPendingMessage);
   if (
     !Array.isArray(input.productIds) ||
     !input.productIds.length ||
@@ -29,6 +33,8 @@ export function prepareTasks(
   const selected = input.productIds.map((id) => products.find((p) => p.id === id));
   if (selected.some((p) => !p || problems(p).length))
     throw new Error('商品资料已变化，请先补充完整');
+  for (const product of selected)
+    requireEnabledPlatform(isTaobaoProduct(product!) ? 'taobao' : 'pdd');
   assertNoActiveTask(
     store.all<Task>('tasks'),
     shop.id,
@@ -38,7 +44,13 @@ export function prepareTasks(
     id: crypto.randomUUID(),
     shopId: shop.id,
     shopName: shop.name,
-    shopSnapshot: { name: shop.name, account: shop.account, updatedAt: shop.updatedAt },
+    platform,
+    shopSnapshot: {
+      name: shop.name,
+      account: shop.account,
+      updatedAt: shop.updatedAt,
+      platform,
+    },
     revision: 0,
     code: p!.code,
     title: p!.title,
@@ -63,7 +75,8 @@ export class TaskRunner {
   constructor(
     private store: Store,
     private directory: string,
-    private adapter: PlatformAdapter,
+    /** 按店铺当前平台取适配器；平台选择器不进入任务调度模块。 */
+    private adapterFor: (shop: Shop) => PlatformAdapter,
     private onFatal: (error: unknown) => void = () => {},
     private onStopped: (id: string, remaining: string[]) => Promise<void> = async () => {},
   ) {}
@@ -109,6 +122,13 @@ export class TaskRunner {
     if (!Array.isArray(ids) || !ids.length || ids.length > 200 || new Set(ids).size !== ids.length)
       throw new Error('任务选择不正确');
     const tasks = ids.map((id) => this.task(id));
+    const savedShops = this.store.all<Shop>('shops');
+    for (const t of tasks)
+      requireEnabledPlatform(
+        t.platform ??
+          t.shopSnapshot?.platform ??
+          savedShops.find((s) => s.id === t.shopId)?.platform,
+      );
     if (tasks.some((t) => t.status === 'succeeded' || t.status === 'running'))
       throw new Error('所选任务已完成或正在执行');
     if (
@@ -154,11 +174,26 @@ export class TaskRunner {
     if (!shop) throw new Error('店铺已不存在');
     if (t.saveAttemptedAt)
       throw new Error('已尝试保存的商品须使用原店铺账号回查，请在店铺管理恢复原账号');
+    const platform = normalizePlatform(shop.platform);
+    // 平台不同就是另一个后台，不能靠确认店铺身份把原任务改投到别的平台。
+    if (
+      (t.platform && t.platform !== platform) ||
+      (t.shopSnapshot?.platform && t.shopSnapshot.platform !== platform)
+    )
+      throw new Error(
+        `该任务属于${platformMeta(t.platform || t.shopSnapshot?.platform).label}，当前店铺是${platformMeta(platform).label}；请新增店铺后重新建立任务`,
+      );
     this.patch(
       t,
       {
+        platform,
         shopName: shop.name,
-        shopSnapshot: { name: shop.name, account: shop.account, updatedAt: shop.updatedAt },
+        shopSnapshot: {
+          name: shop.name,
+          account: shop.account,
+          updatedAt: shop.updatedAt,
+          platform,
+        },
         error: undefined,
       },
       '运营已确认使用当前保存的店铺身份',
@@ -235,6 +270,19 @@ export class TaskRunner {
   private preflight(t: Task): Shop {
     const shop = this.store.all<Shop>('shops').find((s) => s.id === t.shopId);
     if (!shop) throw new ExecutionError('shop_changed', '任务对应店铺已不存在', 'confirm_shop');
+    const platform = normalizePlatform(shop.platform);
+    if (t.platform && t.platform !== platform)
+      throw new ExecutionError(
+        'shop_changed',
+        `任务创建时是${platformMeta(t.platform).label}，当前店铺已改为${platformMeta(platform).label}，请核对任务店铺`,
+        'confirm_shop',
+      );
+    if (t.shopSnapshot?.platform && t.shopSnapshot.platform !== platform)
+      throw new ExecutionError(
+        'shop_changed',
+        `任务记录的店铺平台与当前店铺平台不一致，请核对任务店铺`,
+        'confirm_shop',
+      );
     if (
       t.shopSnapshot &&
       (t.shopSnapshot.name !== shop.name || t.shopSnapshot.account !== shop.account)
@@ -253,13 +301,24 @@ export class TaskRunner {
         );
       this.patch(
         t,
-        { shopSnapshot: { name: shop.name, account: shop.account, updatedAt: shop.updatedAt } },
+        {
+          shopSnapshot: {
+            name: shop.name,
+            account: shop.account,
+            updatedAt: shop.updatedAt,
+            platform,
+          },
+        },
         '旧任务已补录店铺身份，执行时仍核对后台实际身份',
       );
     }
+    if (!t.platform) this.patch(t, { platform });
     if (t.saveAttemptedAt) return shop;
     const issues = problems(t.productSnapshot);
-    if (!t.productSnapshot.freight) issues.push('请补充目标店铺运费模板');
+    // 天猫发品表单没有独立的「运费模板」字段，填了也不写进后台。
+    // 这个必填校验必须按平台分支，否则淘宝任务在任何页面动作之前就被拦下。
+    if (requiresFreightTemplate(platform) && !t.productSnapshot.freight)
+      issues.push('请补充目标店铺运费模板');
     const dimensions = t.productSnapshot.skus[0]?.options || [];
     if (dimensions.length) {
       const combinations = dimensions.reduce(
@@ -312,7 +371,7 @@ export class TaskRunner {
       };
       try {
         const shop = this.preflight(t);
-        await this.adapter.execute(t, shop, context, connected, restart);
+        await this.adapterFor(shop).execute(t, shop, context, connected, restart);
         connected = true;
       } catch (error) {
         const failure = classifyError(error, t);

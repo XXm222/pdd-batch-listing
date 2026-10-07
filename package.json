@@ -1,7 +1,7 @@
 {
   "name": "goods-workspace",
   "productName": "商品运营台",
-  "version": "0.1.46",
+  "version": "0.1.57",
   "private": true,
   "description": "商品资料导入与店铺草稿工作台",
   "author": "商品运营台项目",
@@ -16,7 +16,9 @@
     "dist:mac": "pnpm build && electron-builder --mac dmg",
     "dist:win": "pnpm build && electron-builder --win nsis --x64",
     "format": "prettier --write src electron tests scripts *.json *.yaml *.ts index.html .prettierrc.json .github/workflows/*.yml",
-    "format:check": "prettier --check src electron tests scripts *.json *.yaml *.ts index.html .prettierrc.json .github/workflows/*.yml"
+    "format:check": "prettier --check src electron tests scripts *.json *.yaml *.ts index.html .prettierrc.json .github/workflows/*.yml",
+    "updates:prepare": "node scripts/prepare-updates.cjs",
+    "updates:publish": "node scripts/publish-updates.cjs"
   },
   "dependencies": {
     "fast-xml-parser": "5.11.1",
@@ -43,7 +45,7 @@
     "appId": "com.goodsworkspace.desktop",
     "productName": "商品运营台",
     "directories": {
-      "output": "release/0.1.46"
+      "output": "release/0.1.57"
     },
     "files": [
       "dist/**",

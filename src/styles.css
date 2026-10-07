@@ -18,6 +18,214 @@
   --font: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
+.collection-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin-bottom: 24px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--radius);
+}
+.collection-shop-field {
+  flex: 1;
+  max-width: 420px;
+}
+.collection-shop-field label {
+  display: block;
+  font-size: 13px;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.collection-shop-field select {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+.collection-page .error-message {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.collection-list {
+  padding-bottom: 24px;
+}
+.collection-list .section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.collection-list .section-heading h2 {
+  font-size: 18px;
+}
+.collection-list .section-heading p {
+  font-size: 12px;
+  margin-top: 6px;
+}
+.collection-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.collection-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+  background: var(--surface);
+}
+.collection-table th {
+  text-align: left;
+  background: var(--sidebar);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.collection-table th,
+.collection-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.collection-table tr:last-child td {
+  border-bottom: none;
+}
+.collection-table th:first-child {
+  width: 48px;
+}
+.collection-table th:nth-child(3) {
+  width: 145px;
+}
+.collection-table th:nth-child(4) {
+  width: 210px;
+}
+.collection-product {
+  display: flex;
+  gap: 12px;
+}
+.collection-product strong {
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.6;
+}
+.collection-product small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 6px;
+}
+.collection-thumbnail {
+  width: 54px;
+  height: 54px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--primary);
+  background: var(--soft);
+}
+.collection-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.collection-status {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.collection-status.done {
+  color: var(--green);
+}
+.collection-status.failed {
+  color: var(--red);
+}
+.collection-status.reading {
+  color: var(--primary);
+}
+.collection-row-message {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.collection-actions,
+.collection-progress + .modal-foot > div {
+  display: flex;
+  gap: 10px;
+}
+.collection-progress {
+  padding: 24px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.modal.collection-modal {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.collection-modal .modal-head,
+.collection-modal .modal-foot {
+  flex-shrink: 0;
+}
+.collection-progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--primary);
+  margin: 16px 0;
+}
+.collection-progress ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.collection-progress li {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.collection-progress li strong {
+  display: block;
+  font-size: 14px;
+}
+.collection-progress li small {
+  display: inline-block;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 6px 14px 6px 0;
+}
+.collection-progress li p {
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1100px) {
+  .collection-table th:nth-child(3) {
+    width: 115px;
+  }
+  .collection-table th:nth-child(4) {
+    width: 160px;
+  }
+  .collection-controls {
+    flex-wrap: wrap;
+  }
+}
+
 .execution-banner {
   display: flex;
   align-items: center;
@@ -452,6 +660,40 @@ p {
 .sidebar-link:hover:not(:disabled) {
   background: var(--soft);
   color: var(--primary);
+}
+.sidebar-link.update-highlight {
+  background: var(--soft);
+  color: var(--primary);
+  font-weight: 600;
+}
+.update-badge {
+  margin-left: auto;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #fff;
+  background: var(--primary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.update-content {
+  margin: 16px 0;
+  max-height: min(320px, 40vh);
+  overflow-y: auto;
+}
+.update-content h4 {
+  font-size: 13px;
+  color: var(--ink);
+  margin: 0 0 9px;
+}
+.update-notes-list {
+  padding-left: 20px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 1.7;
+}
+.update-notes-list li + li {
+  margin-top: 7px;
 }
 .sidebar-link:hover {
   color: var(--primary);
@@ -1901,6 +2143,37 @@ input:disabled {
   font-size: 14px;
   font-weight: 600;
 }
+.platform-choice {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.platform-option {
+  display: grid;
+  gap: 3px;
+  padding: 11px 13px;
+  text-align: left;
+  border: 1px solid var(--line, #e3e6ec);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+}
+.platform-option.active {
+  background: #edf2fd;
+  border-color: #d7e1f8;
+  color: var(--primary);
+}
+.platform-option strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.platform-option small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.platform-option.active small {
+  color: var(--primary);
+}
 .compact-shop-form fieldset {
   border: 0;
   margin: 0;
@@ -2104,6 +2377,13 @@ fieldset.editor {
   margin: 0 0 12px;
   max-width: 75ch;
 }
+.sku-guidance p {
+  margin: 0 0 6px;
+}
+.sku-guidance strong {
+  color: var(--ink);
+  font-weight: 500;
+}
 .sku-table.compact-skus {
   table-layout: fixed;
   min-width: 0;
@@ -2139,13 +2419,60 @@ fieldset.editor {
   gap: 6px;
   margin-bottom: 6px;
 }
+.spec-group + .spec-group {
+  margin-top: 10px;
+}
+.spec-group-title {
+  display: block;
+  color: var(--ink);
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+.spec-pair label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+}
 .spec-pair input {
   padding-inline: 8px;
   font-size: 12px;
 }
-.compact-skus td:not(:first-child):not(:last-child) > input {
-  margin-top: 22px;
-  padding-inline: 8px;
+.compact-skus .sku-price-cell {
+  vertical-align: top;
+}
+.sku-price-field {
+  display: grid;
+  gap: 5px;
+  color: var(--ink);
+}
+.compact-skus .sku-heading-row td {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.sku-heading-row .spec-group-title {
+  margin-bottom: 0;
+}
+.compact-skus .sku-price-heading {
+  vertical-align: bottom;
+  color: var(--muted);
+  font-size: 12px;
+}
+.compact-skus input::placeholder {
+  color: var(--muted);
+}
+.sku-field-hint,
+.sku-combination-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.sku-field-hint {
+  margin: 6px 0 0;
+}
+.sku-combination-note {
+  margin: 8px 0 4px;
 }
 .compact-skus td:last-child > .icon-button {
   margin-top: 24px;
@@ -2974,4 +3301,82 @@ textarea {
 .task-meta .text-button {
   justify-content: center;
   gap: 5px;
+}
+
+/* 模板下载：拼多多与天猫字段不同，各带一份模板，先选平台再下载。 */
+.template-actions {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+.template-platform {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line, #e3e6ec);
+  border-radius: 999px;
+  background: #f6f7fa;
+}
+.template-platform button {
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.template-platform button.active {
+  background: #fff;
+  color: var(--primary);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(20 30 60 / 12%);
+}
+/* App update progress inherits the existing workspace palette. */
+.update-body h3 {
+  margin: 0 0 12px;
+}
+.update-body > p {
+  margin: 12px 0;
+}
+.update-notes {
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.update-body progress {
+  width: 100%;
+  height: 12px;
+  accent-color: var(--primary);
+}
+.footer-export-error {
+  color: var(--red);
+  overflow-wrap: anywhere;
+}
+.products-table td.align-right .text-button {
+  display: block;
+  margin-left: auto;
+}
+.editable-images .image-item > .image-file-info {
+  display: block;
+  margin: 4px 0;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  max-width: none;
+  line-height: 1.5;
+}
+.image-issues-list {
+  max-height: min(460px, 55vh);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.image-issues-list ul {
+  margin: 12px 0;
+  padding-left: 20px;
+}
+.image-issues-list li + li {
+  margin-top: 12px;
 }

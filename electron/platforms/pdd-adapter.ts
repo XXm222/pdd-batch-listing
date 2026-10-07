@@ -1,7 +1,11 @@
 import {
   readSkuTable,
   readRemoteImages,
+  readImageUploadFacts,
   readSavedSettings,
+  pddCategoryLeaf,
+  readPddCategoryLeaf,
+  clickPddCategoryResult,
   parseSkuTable,
   parseRemoteImages,
   parseSavedSettings,
@@ -10,6 +14,8 @@ import {
 } from './pdd-page-scripts';
 import fs from 'node:fs';
 import path from 'node:path';
+import { validateLocalImageFiles } from '../importer';
+import { imageUploadSizeLimit, imageSizeText } from '../../src/domain';
 import { LOGIN_STATE, PddLogin, shopIdentityMessage } from './pdd-login';
 import {
   isPddLoginConfirmed,
@@ -127,11 +133,13 @@ const stages: Record<string, TaskStep> = {
   复用已连接浏览器: 'connect',
   登录与核对店铺: 'login',
   检查本机图片资源: 'resources',
+  核对后台图片上传要求: 'resources',
   选择类目并打开填写页: 'form',
   填写标题品牌及属性: 'basic',
   填写规格价格库存及折扣: 'skus',
   设置发货运费及承诺: 'services',
   等待轮播图及详情图上传完成: 'images',
+  核对原图片上传结果: 'images',
   保存前核对商品资料: 'pre_save',
   保存草稿并等待确认: 'save',
   重新打开草稿核对保存字段: 'saved_fields',
@@ -509,6 +517,46 @@ export class PddAdapter {
     ).run(shop, checkOnly ? 'check' : 'reuse');
     this.check('identity', true, shopIdentityMessage(shop));
   }
+  private async selectCategory(category: string) {
+    const leaf = pddCategoryLeaf(category);
+    if (!leaf)
+      throw new ExecutionError('invalid_product', '请填写最后一级商品类目', 'edit_product');
+    const selector = 'input[placeholder="请输入关键词搜索分类"]';
+    await this.bridge.wait(
+      () =>
+        this.bridge.eval<boolean>(
+          `(() => {const es=[...document.querySelectorAll(${JSON.stringify(selector)})].filter(e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden');return es.length===1;})()`,
+        ),
+      12000,
+      '后台类目搜索框未加载，请核对分类页面',
+    );
+    await this.bridge.fill(selector, leaf, 'keyboard');
+    // Keyboard fill leaves the field. PDD opens suggestions on mouse down,
+    // so focus alone cannot reopen the search panel.
+    const focused = await this.bridge.eval<boolean>(
+      `(() => {const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.value!==${JSON.stringify(leaf)})return false;e.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));e.click();e.focus();return true;})()`,
+    );
+    if (!focused) throw new NeedsUser('类目搜索框内容已变化，请核对分类页面后继续');
+    await this.bridge.wait(
+      async () => {
+        this.guard();
+        const result = await this.bridge.eval<{ count: number; path?: string }>(
+          `(${clickPddCategoryResult.toString()})(${JSON.stringify(leaf)})`,
+        );
+        if (result.count > 1)
+          throw new NeedsUser(`后台有多个同名类目“${leaf}”，请在分类搜索结果中核对正确类目`);
+        return result.count === 1;
+      },
+      12000,
+      `后台没有唯一可用的末级类目“${leaf}”，请核对名称或店铺可用类目`,
+    );
+    await this.bridge.wait(
+      async () =>
+        (await this.bridge.eval<string>(`(${readPddCategoryLeaf.toString()})(true)`)) === leaf,
+      12000,
+      `后台尚未选中末级类目“${leaf}”，请核对分类页面`,
+    );
+  }
   async execute(t: Task, shop: Shop, context: ExecutionContext, reuseTab = false, restart = false) {
     this.context = context;
     this.task = t;
@@ -564,17 +612,15 @@ export class PddAdapter {
     const p = t.productSnapshot;
     // Check local resources before allocating a goods ID or uploading anything.
     await this.timed(t, '检查本机图片资源', async () => {
-      for (const name of [
-        ...p.main,
-        ...p.detail,
-        ...p.skus.map((s) => s.image).filter(Boolean),
-      ] as string[]) {
-        const a = p.images[name];
-        if (!a || !fs.existsSync(path.join(this.directory, 'assets', a.id)))
-          throw new Error(`商品图片缺失：${name}`);
+      try {
+        await validateLocalImageFiles(p, path.join(this.directory, 'assets'));
+      } catch (error) {
+        throw new ExecutionError('invalid_product', (error as Error).message, 'edit_product');
       }
     });
     this.guard();
+    const categoryLeaf = pddCategoryLeaf(p.category);
+    const categoryMatch = `${!!categoryLeaf} && (${readPddCategoryLeaf.toString()})() === ${JSON.stringify(categoryLeaf)}`;
     const existingForm = !!t.goodsId;
     if (existingForm) {
       const current = await this.bridge.eval<{
@@ -582,7 +628,7 @@ export class PddAdapter {
         category: boolean;
         input: boolean;
       }>(
-        `(() => ({id:new URL(location.href).searchParams.get('goods_id'),category:document.body.innerText.split('\\n').some(v=>v.trim()===${JSON.stringify(p.category)}),input:!!document.querySelector('[data-tracking-click-viewid="title_input_area"]')}))()`,
+        `(() => ({id:new URL(location.href).searchParams.get('goods_id'),category:${categoryMatch},input:!!document.querySelector('[data-tracking-click-viewid="title_input_area"]')}))()`,
       );
       if (current.id !== t.goodsId || !current.category || !current.input)
         throw new ExecutionError(
@@ -597,17 +643,7 @@ export class PddAdapter {
     if (!existingForm)
       await this.timed(t, '选择类目并打开填写页', async () => {
         await this.bridge.navigate('https://mms.pinduoduo.com/goods/category');
-        for (const label of p.category.split(/\s*>\s*/)) {
-          const selector = await this.bridge.wait(
-            async () =>
-              await this.bridge.eval<string | false>(
-                `(() => {const es=[...document.querySelectorAll('li.content-cat')].filter(e=>e.innerText.replace(/^[A-Z]\\s*/,'').trim()===${JSON.stringify(label.trim())});return es.length===1?'#'+es[0].id+' a.cate':false;})()`,
-              ),
-            12000,
-            `后台没有可用类目：${label}`,
-          );
-          await this.bridge.call('click', { selector });
-        }
+        await this.selectCategory(p.category);
         await this.bridge.clickName('button', '确认发布该类商品');
         const form = await this.bridge.wait(
           async () =>
@@ -630,12 +666,9 @@ export class PddAdapter {
         );
         await this.checkIdentity(shop);
         await this.bridge.wait(
-          async () =>
-            await this.bridge.eval<boolean>(
-              `document.body.innerText.split('\\n').some(v=>v.trim()===${JSON.stringify(p.category)})`,
-            ),
+          async () => await this.bridge.eval<boolean>(categoryMatch),
           12000,
-          '后台商品分类与资料路径不同，请核对',
+          `后台商品分类与末级类目“${categoryLeaf}”不同，请核对`,
         );
       });
     await this.timed(t, '填写标题品牌及属性', async () => {
@@ -651,6 +684,11 @@ export class PddAdapter {
         if (value) await this.attribute(name, value, true);
       for (const a of p.attributes || []) if (a.value) await this.attribute(a.name, a.value, true);
     });
+    await this.timed(t, '核对后台图片上传要求', async () => {
+      this.guard();
+      this.patch(t, { phase: '核对后台图片上传要求' });
+      await this.validateImageUploadSizes(t, p);
+    });
     await this.timed(t, '填写规格价格库存及折扣', async () => {
       this.guard();
       this.patch(t, { phase: '填写规格价格库存' }, '生成规格组合并核对价格库存');
@@ -661,6 +699,7 @@ export class PddAdapter {
     this.guard();
     await this.timed(t, '设置发货运费及承诺', async () => await this.services(p));
     this.patch(t, { phase: '上传商品图片' }, '按 Excel 中的顺序上传轮播图和详情图');
+    await this.reuseSubmittedImages(t, shop, p);
     await this.images(t, p);
     await this.timed(t, '保存前核对商品资料', async () => {
       this.guard();
@@ -1443,6 +1482,27 @@ export class PddAdapter {
       `(() => {const m=document.querySelector(${JSON.stringify(selector)})?.innerText.match(/已上传\\s*(\\d+)\\s*\\//);return m?Number(m[1]):-1;})()`,
     );
   }
+  private async reuseSubmittedImages(t: Task, shop: Shop, p: Product) {
+    if (!t.uploadSubmission || t.uploadManifest) return;
+    const completed = (['main', 'detail'] as const).every(
+      (kind) =>
+        !p[kind].length ||
+        t.timings?.some(
+          (timing) =>
+            timing.status === 'done' &&
+            timing.name ===
+              `批量提交${p[kind].length}张${kind === 'main' ? '商品轮播图' : '商品详情'}`,
+        ),
+    );
+    if (!completed) return;
+    await this.timed(t, '核对原图片上传结果', async () => {
+      this.guard();
+      const result = await this.recoverPage(t, shop, 'wait_uploads');
+      if (!result.ok || !result.uploadManifest)
+        throw new ExecutionError('upload_uncertain', result.message, 'inspect_form');
+      this.patch(t, { uploadManifest: result.uploadManifest }, result.message);
+    });
+  }
   private async images(t: Task, p: Product) {
     const current = await this.remoteImages();
     if (current.main.length || current.detail.length) {
@@ -1464,6 +1524,7 @@ export class PddAdapter {
         'restart_form',
       );
     }
+    const baseline = await this.validateImageUploadSizes(t, p);
     for (const [kind, track, label] of [
       ['main', 'carousel_img_localfile_upload', '商品轮播图'],
       ['detail', 'detail_img_localfile_upload', '商品详情'],
@@ -1485,11 +1546,15 @@ export class PddAdapter {
         name,
       }));
       this.patch(t, { phase: `批量上传${label} 0/${files.length}` });
+      const entry = await this.imageUploadFacts(kind, true);
       await this.timed(
         t,
         `批量提交${files.length}张${label}`,
         async () =>
-          await this.bridge.uploadMany(`input[data-tracking-click-viewid="${track}"]`, files),
+          await this.bridge.uploadMany(
+            entry.inputSelector || `input[data-tracking-click-viewid="${track}"]`,
+            files,
+          ),
       );
     }
     // Start both independent upload controls before waiting, preserving each file order.
@@ -1498,6 +1563,25 @@ export class PddAdapter {
       await this.bridge.wait(
         async () => {
           this.guard();
+          for (const kind of ['main', 'detail'] as const)
+            if (p[kind].length) {
+              const facts = await this.imageUploadFacts(kind);
+              const rejection = facts.notices.find(
+                (message) =>
+                  !baseline.has(message) &&
+                  /(?:上传|读取|校验).{0,16}(?:失败|错误)|(?:图片|文件).{0,20}(?:过大|太大|格式错误|尺寸不符|大小超出)|(?:超过|超出).{0,16}(?:限制|上限|重新|压缩)|不支持.{0,12}(?:格式|图片)|无法上传/.test(
+                    message,
+                  ),
+              );
+              if (rejection)
+                throw new ExecutionError(
+                  'invalid_product',
+                  `后台拒绝图片上传：${rejection}`,
+                  'edit_product',
+                  true,
+                  { source: 'image_upload_rejection', kind, notice: rejection },
+                );
+            }
           const ready = await this.bridge.eval<{ main: number; detail: number }>(
             `(() => ({main:[...document.querySelector('[id="basic.carousel_gallery"]').querySelectorAll('[style]')].filter(e=>/^url\\(["']?https:\\/\\//.test(e.style.backgroundImage)).length,detail:[...document.querySelector('#detail_pic .decoration-operate').querySelectorAll('img')].filter(e=>/^https:\\/\\//.test(e.getAttribute('src')||'')).length}))()`,
           );
@@ -1513,6 +1597,92 @@ export class PddAdapter {
       );
     });
     this.patch(t, { uploadManifest: { goodsId: t.goodsId!, ...(await this.remoteImages()) } });
+  }
+  private async imageUploadFacts(kind: 'main' | 'detail', requireInput = false) {
+    let observed: Record<string, unknown> | undefined;
+    try {
+      return await this.bridge.wait(
+        async () => {
+          this.guard();
+          const facts = await this.bridge.eval<unknown>(
+            `(${readImageUploadFacts.toString()})(${JSON.stringify(kind)})`,
+          );
+          if (
+            !isRecord(facts) ||
+            typeof facts.text !== 'string' ||
+            facts.text.length > 5000 ||
+            !Array.isArray(facts.notices) ||
+            facts.notices.length > 20 ||
+            facts.notices.some((n: unknown) => typeof n !== 'string' || n.length > 300)
+          )
+            throw new ExecutionError(
+              'platform_changed',
+              '图片上传区返回内容无法识别，已保留当前页面',
+              'inspect_form',
+            );
+          observed = {
+            source: 'image_upload_area',
+            kind,
+            rootCount: facts.rootCount,
+            inputCount: facts.inputCount,
+            requireInput,
+          };
+          if (
+            facts.available !== true ||
+            (requireInput &&
+              (facts.inputCount !== 1 ||
+                typeof facts.inputSelector !== 'string' ||
+                !facts.inputSelector ||
+                facts.inputSelector.length > 400))
+          )
+            return false;
+          return facts as {
+            available: true;
+            text: string;
+            notices: string[];
+            inputSelector?: string;
+          };
+        },
+        8000,
+        '图片上传区尚未就绪',
+      );
+    } catch (error) {
+      if (!(error instanceof ExecutionError) || error.code !== 'page_timeout') throw error;
+      throw new ExecutionError(
+        'platform_changed',
+        `${kind === 'main' ? '轮播图' : '详情图'}${requireInput ? '上传入口未能唯一定位' : '上传区域尚未读取'}，已保留当前页面，请稍后继续`,
+        'inspect_form',
+        true,
+        observed,
+      );
+    }
+  }
+  private async validateImageUploadSizes(t: Task, p: Product) {
+    const baseline = new Set<string>();
+    for (const kind of ['main', 'detail'] as const) {
+      if (!p[kind].length) continue;
+      const facts = await this.imageUploadFacts(kind);
+      facts.notices.forEach((notice) => baseline.add(notice));
+      const limit = imageUploadSizeLimit(facts.text);
+      if (!limit) {
+        this.patch(
+          t,
+          {},
+          `${kind === 'main' ? '轮播图' : '详情图'}：当前上传区未标明单张大小上限，继续读取平台上传返回提示`,
+        );
+        continue;
+      }
+      for (const name of p[kind])
+        if (limit.strict ? p.images[name].bytes >= limit.bytes : p.images[name].bytes > limit.bytes)
+          throw new ExecutionError(
+            'invalid_product',
+            `${name}：${imageSizeText(p.images[name].bytes)}，不符合后台要求“${limit.label}”，请压缩后重新添加`,
+            'edit_product',
+            true,
+            { source: 'image_size', kind, name, bytes: p.images[name].bytes, limit },
+          );
+    }
+    return baseline;
   }
   private async remoteImages() {
     return parseRemoteImages(await this.bridge.eval<unknown>(`(${readRemoteImages.toString()})()`));
@@ -1682,12 +1852,14 @@ export class PddAdapter {
       stage,
     );
     const categoryMatches = await this.bridge.eval<boolean>(
-      `document.body.innerText.split('\\n').some(v=>v.trim()===${JSON.stringify(p.category)})`,
+      `${!!pddCategoryLeaf(p.category)} && (${readPddCategoryLeaf.toString()})() === ${JSON.stringify(pddCategoryLeaf(p.category))}`,
     );
     this.check(
       'category',
       categoryMatches,
-      categoryMatches ? `类目路径：${p.category}` : `后台类目与资料不同：${p.category}`,
+      categoryMatches
+        ? `末级类目：${pddCategoryLeaf(p.category)}`
+        : `后台末级类目与资料不同：${pddCategoryLeaf(p.category)}`,
       stage,
     );
     for (const [name, value] of [

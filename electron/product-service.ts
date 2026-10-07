@@ -97,7 +97,10 @@ export function sanitizeProducts(store: Store, input: unknown): Product[] {
     const services = { sevenDay: '按平台规则', invoice: '否', authenticity: '否', ...raw.services };
     p.services = { sevenDay: '', invoice: '', authenticity: '' };
     for (const key of ['sevenDay', 'invoice', 'authenticity'] as const) {
-      if (!['是', '否', '按平台规则'].includes(services[key]))
+      if (
+        !['是', '否', '按平台规则'].includes(services[key]) &&
+        !(p.source.startsWith('拼多多采集：') && services[key] === '')
+      )
         throw new Error('服务与承诺设置不正确');
       p.services[key] = services[key];
     }

@@ -4,12 +4,20 @@ import { createHash } from 'node:crypto';
 import JSZip from 'jszip';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { imageSize } from 'image-size';
-import { newProduct, safeImageName } from '../src/domain';
+import {
+  newProduct,
+  safeImageName,
+  TAOBAO_TEMPLATE_FORMAT,
+  LOCAL_IMAGE_MAX_BYTES,
+  imageProblems,
+  isTaobaoProduct,
+} from '../src/domain';
 import type { Asset, Product } from '../src/types';
 import { readWorkbookPictures, type WorkbookPicture } from './workbook-images';
 
 const mapping: Record<string, keyof Product> = {
   商品编码: 'code',
+  商家编码: 'outerId',
   商品标题: 'title',
   目标类目: 'category',
   商品品牌: 'brand',
@@ -80,6 +88,9 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
     removeNSPrefix: true,
     parseTagValue: false,
     trimValues: false,
+    // Excel/WPS 把中文写成字面 UTF-8，openpyxl 等工具写成 &#NNNN; 数字实体。
+    // 不解码会让「项目」「填写值」这类表头全部读成实体串，整份表格都认不出来。
+    htmlEntities: true,
   });
   const readXml = async (name: string) => {
     const entry = zip.file(name);
@@ -191,12 +202,21 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
         [
           '拼单价（元）',
           '单买价（元）',
+          '一口价（元）',
           '库存',
           '是否测试素材',
           '模板版本',
           '7天无理由退货',
           '正品发票',
           '假一赔十',
+          '发货地省份',
+          '发货地城市',
+          '提取方式',
+          '运费承担',
+          '发货时间',
+          '上架时间',
+          '返点比例（%）',
+          '采集来源',
         ].includes(row[0])
       ) {
         if (Object.hasOwn(values, row[0])) throw new Error(`商品字段重复：${row[0]}`);
@@ -214,44 +234,56 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
         (p as unknown as Record<string, unknown>)[key] = values[label] || '';
       }
     p.demo = values['是否测试素材'] === '是';
-    p.source = path.basename(file);
+    p.source = values['采集来源'] || path.basename(file);
     p.services = {
-      sevenDay: values['7天无理由退货'] || '按平台规则',
-      invoice: values['正品发票'] || '否',
-      authenticity: values['假一赔十'] || '否',
+      sevenDay: values['7天无理由退货'] || (values['采集来源'] ? '' : '按平台规则'),
+      invoice: values['正品发票'] || (values['采集来源'] ? '' : '否'),
+      authenticity: values['假一赔十'] || (values['采集来源'] ? '' : '否'),
     };
     p.skus = [
       {
         spec: '默认规格',
-        group: values['拼单价（元）'] || '',
-        single: values['单买价（元）'] || '',
+        group: values['拼单价（元）'] || values['一口价（元）'] || '',
+        single: values['单买价（元）'] || values['一口价（元）'] || '',
         stock: values['库存'] || '',
       },
     ];
     const isSkuHeader = (row: string[]) => {
       const h = row.map(skuHeader);
-      return h.includes('规格一名称') && h.includes('规格编码');
+      // 天猫 SKU 表没有编码列，淘宝模板已去掉「规格编码」；用一个两版都有的列做锚点。
+      return h.includes('规格一名称') && (h.includes('规格编码') || h.includes('一口价（元）'));
     };
     const skuSheet = rows.find((sheet) => sheet.some(isSkuHeader));
-    if (values['模板版本'] && !['2', '3'].includes(values['模板版本']))
+    const TEMPLATE_VERSIONS = ['2', '3', '4'];
+    const version = values['模板版本'] || '';
+    if (version && !TEMPLATE_VERSIONS.includes(version))
       throw new Error('不支持此模板版本，请下载当前运营模板');
-    if (['2', '3'].includes(values['模板版本']) && !skuSheet) throw new Error('模板缺少规格清单页');
+    const taobao = version === '4';
+    if (TEMPLATE_VERSIONS.includes(version) && !skuSheet) throw new Error('模板缺少规格清单页');
     if (skuSheet) {
-      p.templateFormat = values['模板版本'] === '3' ? '运营模板 v3' : '运营模板 v2';
+      p.templateFormat = {
+        '2': '运营模板 v2',
+        '3': '运营模板 v3',
+        '4': TAOBAO_TEMPLATE_FORMAT,
+      }[version as '2' | '3' | '4'];
       p.expectedShop = '';
       if (values['是否测试素材'] && !['是', '否'].includes(values['是否测试素材']))
         throw new Error('是否测试素材只能填写是或否');
       p.demoDeclared = ['是', '否'].includes(values['是否测试素材']);
       const headerIndex = skuSheet.findIndex(isSkuHeader);
       const header = skuSheet[headerIndex].map(skuHeader);
+      // 拼多多是「拼单价 + 单买价」，天猫只有一个「一口价」。
+      const priceColumns = taobao
+        ? (['一口价（元）'] as const)
+        : (['拼单价（元）', '单买价（元）'] as const);
       const required = [
-        '规格编码',
+        // 规格编码：天猫 SKU 表没有这一列，淘宝模板不提供，因此只对拼多多必填。
+        ...(taobao ? [] : (['规格编码'] as const)),
         '规格一名称',
         '规格一值',
         '规格二名称',
         '规格二值',
-        '拼单价（元）',
-        '单买价（元）',
+        ...priceColumns,
         '库存',
       ];
       const imageColumn = header.findIndex((label) => ['规格图', '规格图文件名'].includes(label));
@@ -283,8 +315,9 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
             options,
             code: value('规格编码'),
             image,
-            group: value('拼单价（元）'),
-            single: value('单买价（元）'),
+            // 淘宝模板只有一个「一口价」；两侧都写上，下游按平台各取所需。
+            group: taobao ? value('一口价（元）') : value('拼单价（元）'),
+            single: taobao ? value('一口价（元）') : value('单买价（元）'),
             stock: value('库存'),
           };
         }),
@@ -292,6 +325,16 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
       checkPicturesInSheet(skuSheet);
       p.skuCode = '';
       p.attributes = [];
+      if (taobao)
+        p.taobao = {
+          originProvince: values['发货地省份'] || '',
+          originCity: values['发货地城市'] || '',
+          extractWay: values['提取方式'] || '邮寄',
+          freightBearer: values['运费承担'] || '卖家承担',
+          deliveryTime: values['发货时间'] || '48小时',
+          shelfTime: values['上架时间'] || '放入仓库',
+          auctionPoint: values['返点比例（%）'] || '0.5',
+        };
       const attributeIndex = info.findIndex((row) => row[0] === '属性名称' && row[1] === '填写值');
       if (attributeIndex >= 0) {
         const extra = info.slice(attributeIndex + 1).filter((row) => row.slice(0, 3).some(Boolean));
@@ -309,10 +352,27 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
       ),
     );
     if (!images) throw new Error('没有图片清单页，请使用完整原模板');
-    for (const [kind, key, max] of [
-      ['轮播图', 'main', 10],
-      ['详情图', 'detail', 50],
-    ] as const) {
+    // 淘宝模板按后台的图片位命名；拼多多模板沿用「轮播图 / 详情图」。
+    const kinds = (
+      taobao
+        ? [
+            ['1:1主图', 'main', 5],
+            ['3:4主图', 'threeToFour', 5],
+            ['详情图', 'detail', 20],
+            ['白底图', 'whiteBg', 1],
+            ['卖点图', 'usp', 1],
+          ]
+        : [
+            ['轮播图', 'main', 10],
+            ['详情图', 'detail', 50],
+          ]
+    ) as readonly (readonly [
+      string,
+      'main' | 'threeToFour' | 'detail' | 'whiteBg' | 'usp',
+      number,
+    ])[];
+    const allowedKinds = ['用途', ...kinds.map(([kind]) => kind)];
+    for (const [kind, key, max] of kinds) {
       const selected = images.filter(
         (row) => row[0] === kind && (row[2] || rowPicture(images, row, 2)),
       );
@@ -337,13 +397,10 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
     }
     if (
       images.some(
-        (row) =>
-          (row[2] || rowPicture(images, row, 2)) &&
-          row[0] &&
-          !['用途', '轮播图', '详情图'].includes(row[0]),
+        (row) => (row[2] || rowPicture(images, row, 2)) && row[0] && !allowedKinds.includes(row[0]),
       )
     )
-      throw new Error('图片用途只能填写轮播图或详情图');
+      throw new Error(`图片用途只能填写${kinds.map(([kind]) => kind).join('、')}`);
     checkPicturesInSheet(images);
     return [p];
   }
@@ -418,18 +475,33 @@ export async function collectFiles(root: string, output: string[] = []): Promise
   }
   return output;
 }
-export async function saveImage(file: string, assetsDir: string): Promise<Asset> {
-  if (!safeName(path.basename(file))) throw new Error('图片文件名不能包含目录或分号，请改名后导入');
+async function imageFileBytes(file: string, name: string): Promise<Buffer> {
+  if (!safeName(name)) throw new Error('图片文件名不能包含目录或分号，请改名后导入');
   const stat = await fs.lstat(file);
   if (!stat.isFile() || stat.isSymbolicLink())
-    throw new Error(`${path.basename(file)} 须为普通图片文件，不支持符号链接`);
-  if (stat.size > 20 * 1024 * 1024)
-    throw new Error(`${path.basename(file)}：本机读取单张图片最多20MB，上传限制需按图片用途核验`);
-  return saveImageBytes(await fs.readFile(file), path.basename(file), assetsDir);
+    throw new Error(`${name} 须为普通图片文件，不支持符号链接`);
+  if (stat.size > LOCAL_IMAGE_MAX_BYTES)
+    throw new Error(`${name}：本机读取单张图片最多20MB，上传限制需按图片用途核验`);
+  return fs.readFile(file);
+}
+export async function inspectImageFile(file: string, name = path.basename(file)): Promise<Asset> {
+  return saveImageBytes(await imageFileBytes(file, name), name);
+}
+export async function saveImage(file: string, assetsDir: string): Promise<Asset> {
+  return saveImageBytes(
+    await imageFileBytes(file, path.basename(file)),
+    path.basename(file),
+    assetsDir,
+  );
 }
 async function saveImageBytes(raw: Buffer, name: string, assetsDir?: string): Promise<Asset> {
-  if (raw.length > 20 * 1024 * 1024) throw new Error(`${name}：单张图片最多 20MB`);
-  const size = imageSize(raw);
+  if (raw.length > LOCAL_IMAGE_MAX_BYTES) throw new Error(`${name}：超过本机单张读取上限 20MB`);
+  let size: ReturnType<typeof imageSize>;
+  try {
+    size = imageSize(raw);
+  } catch {
+    throw Error(`无法读取 PNG 或 JPEG 图片：${name}`);
+  }
   if (!size.width || !size.height || !['png', 'jpg'].includes(size.type || ''))
     throw new Error(`无法读取 PNG 或 JPEG 图片：${name}`);
   const id = createHash('sha256').update(raw).digest('hex');
@@ -444,7 +516,39 @@ async function saveImageBytes(raw: Buffer, name: string, assetsDir?: string): Pr
     width: size.width,
     height: size.height,
     bytes: raw.length,
+    format: size.type === 'png' ? 'png' : 'jpg',
   };
+}
+export async function validateLocalImageFiles(p: Product, directory: string): Promise<void> {
+  const groups = [
+    ['main', p.main],
+    ['detail', p.detail],
+    ['sku', p.skus.map((s) => s.image).filter(Boolean)],
+    ['threeToFour', p.threeToFour || []],
+    ['whiteBg', p.whiteBg || []],
+    ['usp', p.usp || []],
+  ] as const;
+  const checked = new Map<string, Asset>();
+  for (const [kind, names] of groups)
+    for (const name of names as string[]) {
+      const declared = p.images[name];
+      if (!declared || !/^[a-f0-9]{64}$/.test(declared.id))
+        throw Error(`商品图片缺失或标识无效：${name}`);
+      let actual = checked.get(declared.id);
+      if (!actual) {
+        actual = await inspectImageFile(path.join(directory, declared.id), name);
+        checked.set(declared.id, actual);
+      }
+      if (
+        actual.id !== declared.id ||
+        actual.bytes !== declared.bytes ||
+        actual.width !== declared.width ||
+        actual.height !== declared.height
+      )
+        throw Error(`${name}：图片文件与已保存资料不同，请重新添加或导入`);
+      const issues = imageProblems({ ...actual, name }, kind, isTaobaoProduct(p));
+      if (issues.length) throw Error(issues.join('；'));
+    }
 }
 export async function importFiles(
   files: string[],

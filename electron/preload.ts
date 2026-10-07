@@ -2,10 +2,45 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopApi } from '../src/types';
 const call = async (name: string, value?: unknown) => {
   const response = await ipcRenderer.invoke(name, value);
-  if (!response.ok) throw new Error(response.error);
+  if (!response.ok) {
+    const error = new Error(response.error);
+    if (
+      Array.isArray(response.imageIssues) &&
+      response.imageIssues.length <= 120 &&
+      response.imageIssues.every((s: unknown) => typeof s === 'string' && s.length <= 4000)
+    )
+      Object.assign(error, { imageIssues: response.imageIssues });
+    throw error;
+  }
   return response.data;
 };
 const api: DesktopApi = {
+  collectionState: () => call('collection:state'),
+  collectShop: (id) => call('collection:list', id),
+  exportShopGoods: (ids) => call('collection:export', ids),
+  cancelCollection: () => call('collection:cancel'),
+  showCollectionFile: () => call('collection:folder'),
+  onCollectionChanged: (listener) => {
+    const receive = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) =>
+      listener(state);
+    ipcRenderer.on('collection:changed', receive);
+    return () => ipcRenderer.removeListener('collection:changed', receive);
+  },
+  exportProduct: (product) => call('products:export', product),
+  updateState: () => call('updates:state'),
+  checkUpdate: () => call('updates:check'),
+  downloadUpdate: () => call('updates:download'),
+  cancelUpdate: () => call('updates:cancel'),
+  installUpdate: () => call('updates:install'),
+  openUpdateInstaller: () => call('updates:manual'),
+  onUpdateChanged: (listener) => {
+    const receive = (
+      _event: Electron.IpcRendererEvent,
+      state: import('../src/types').UpdateState,
+    ) => listener(state);
+    ipcRenderer.on('updates:changed', receive);
+    return () => ipcRenderer.removeListener('updates:changed', receive);
+  },
   browserConnection: () => call('browser:connection'),
   exportBrowserExtension: () => call('browser:export-extension'),
   copyBrowserExtensionPath: () => call('browser:copy-extension-path'),
@@ -39,7 +74,7 @@ const api: DesktopApi = {
   },
   stopTasks: () => call('tasks:stop'),
   openEvidence: (id) => call('tasks:evidence', id),
-  downloadTemplate: (kind) => call('template:download', kind),
+  downloadTemplate: (kind, platform) => call('template:download', { kind, platform }),
   showDataFolder: () => call('workspace:folder'),
   clearTaskRecords: (ids) => call('tasks:clear-records', ids),
   restoreTaskRecords: (ids) => call('tasks:restore-records', ids),

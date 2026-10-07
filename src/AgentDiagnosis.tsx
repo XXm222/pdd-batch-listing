@@ -164,7 +164,7 @@ export function AgentDiagnosis({
           </label>
           <small>
             {loginStage
-              ? '只检查拼多多页面的登录状态和匹配结果，不读取密码、完整账号或页面正文。'
+              ? '只检查该平台后台页面的登录状态和匹配结果，不读取密码、完整账号或页面正文。'
               : '只读取已核对店铺及商品编号的原页面。页面未打开时会说明限制。'}
           </small>
           {scopeChanged ? (

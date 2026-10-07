@@ -26,6 +26,14 @@ import {
   isStructuredProduct,
 } from './domain';
 import { PictureEditor, SkuEditor } from './ProductEditors';
+import {
+  DEFAULT_PLATFORM,
+  PLATFORMS,
+  PLATFORM_ORDER,
+  normalizePlatform,
+  platformMeta,
+  type PlatformId,
+} from './platforms';
 
 export function Modal({
   title,
@@ -115,6 +123,12 @@ export function Recognition({
   const [index, setIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [exported, setExported] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
+  const [exportError, setExportError] = useState('');
+  const [imageError, setImageError] = useState('');
+  const [imageIssues, setImageIssues] = useState<string[]>([]);
+  const [showImageIssues, setShowImageIssues] = useState(false);
   const p = products[index];
   const [reviewIssues, setReviewIssues] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -142,8 +156,13 @@ export function Recognition({
   const issues = reports.find((report) => report.index === index)?.issues || [];
   const incomplete = reports.length;
   const issueCount = reports.reduce((count, report) => count + report.issues.length, 0);
-  const update = (fn: (p: Product) => Product) =>
+  const update = (fn: (p: Product) => Product) => {
+    setExported(false);
+    setExportError('');
+    setImageError('');
+    setImageIssues([]);
     setProducts((all) => all.map((item, i) => (i === index ? fn(item) : item)));
+  };
   const field = (key: keyof Product, value: string) => update((p) => ({ ...p, [key]: value }));
   const dirty = JSON.stringify(products) !== JSON.stringify(initial);
   const requestClose = () => {
@@ -152,20 +171,51 @@ export function Recognition({
   const supplement = async (target: ImageTarget) => {
     setBusy(true);
     setError('');
+    setImageError('');
+    setImageIssues([]);
     try {
       const assets = await window.desktop.supplement();
       if (!assets) return;
       const next = applyImages(p, assets, target);
       update(() => next);
     } catch (e) {
-      setError((e as Error).message);
+      setImageError((e as Error).message);
+      const all = (e as Error & { imageIssues?: unknown }).imageIssues;
+      setImageIssues(
+        Array.isArray(all) && all.every((s) => typeof s === 'string')
+          ? all
+          : [(e as Error).message],
+      );
     } finally {
+      setBusy(false);
+    }
+  };
+  const exportExcel = async () => {
+    if (busy) return;
+    setBusy(true);
+    setExportingExcel(true);
+    setExportError('');
+    setImageError('');
+    setError('');
+    setExported(false);
+    try {
+      const match = conflicts.find((c) => c.product.id === p.id);
+      if (match && !choiceFor(p)) throw Error('请先核对重复商品，选择更新或跳过');
+      const product = match ? { ...p, id: match.existing.id, savedAt: match.existing.savedAt } : p;
+      if (await window.desktop.exportProduct(product)) setExported(true);
+    } catch (e) {
+      setExportError((e as Error).message);
+    } finally {
+      setExportingExcel(false);
       setBusy(false);
     }
   };
   const save = async () => {
     if (busy) return;
     setBusy(true);
+    setExported(false);
+    setExportError('');
+    setImageError('');
     setError('');
     try {
       const codes = kept.map((product) => product.code.trim());
@@ -221,7 +271,20 @@ export function Recognition({
         footer={
           <>
             <div className="footer-note">
-              {incomplete ? (
+              {exportingExcel ? (
+                <span role="status">正在导出含图 Excel…</span>
+              ) : exportError || imageError ? (
+                <span className="footer-export-error" role="alert">
+                  {exportError || imageError}
+                  {imageError && imageIssues.length ? (
+                    <button className="text-button" onClick={() => setShowImageIssues(true)}>
+                      查看全部问题（{imageIssues.length}）
+                    </button>
+                  ) : null}
+                </span>
+              ) : exported ? (
+                <span role="status">含图 Excel 已导出，图片已嵌入，可直接分享。</span>
+              ) : incomplete ? (
                 <span className="pending-summary">
                   <AlertCircle size={15} />
                   {incomplete} 件商品 · {issueCount} 项待补充
@@ -241,11 +304,18 @@ export function Recognition({
               )}
             </div>
             <div className="button-group">
+              <button
+                className="button"
+                onClick={() => void exportExcel()}
+                disabled={busy || choiceFor(p) === 'skip'}
+              >
+                {exportingExcel ? '正在导出…' : '导出当前商品 Excel'}
+              </button>
               <button className="button" onClick={requestClose} disabled={busy}>
                 取消
               </button>
               <button className="button primary" onClick={requestSave} disabled={busy}>
-                {busy ? '正在处理…' : '保存商品资料'}
+                {busy && !exportingExcel ? '正在处理…' : '保存商品资料'}
               </button>
             </div>
           </>
@@ -257,7 +327,12 @@ export function Recognition({
               <button
                 key={item.id}
                 className={`recognition-item ${i === index ? 'active' : ''}`}
-                onClick={() => setIndex(i)}
+                onClick={() => {
+                  setIndex(i);
+                  setExported(false);
+                  setExportError('');
+                  setImageError('');
+                }}
                 disabled={busy}
                 aria-pressed={i === index}
               >
@@ -268,6 +343,11 @@ export function Recognition({
             ))}
           </aside>
           <fieldset className="editor" disabled={busy}>
+            {exported ? (
+              <p className="success-message" role="status">
+                含图 Excel 已导出。图片已嵌入，发给同事即可直接导入。
+              </p>
+            ) : null}
             {error ? (
               <div className="error-message" role="alert">
                 {error}
@@ -297,9 +377,15 @@ export function Recognition({
                     onChange={(e) => field(key, e.target.value)}
                     aria-invalid={['code', 'title', 'category'].includes(key) && !p[key].trim()}
                     maxLength={key === 'title' ? 80 : 200}
+                    placeholder={key === 'category' ? '例如：足浴盆/足浴桶' : undefined}
                   />
                   {key === 'brand' ? (
                     <p className="quiet-note">可留空，选店后确认品牌及资质。</p>
+                  ) : null}
+                  {key === 'category' ? (
+                    <p className="quiet-note">
+                      只需填写最后一级类目；填写完整路径时，也按最后一级匹配。
+                    </p>
                   ) : null}
                 </label>
               ))}
@@ -328,7 +414,7 @@ export function Recognition({
                 }
               >
                 <Plus size={15} />
-                添加规格
+                添加规格组合
               </button>
             </div>
             {isStructuredProduct(p) ? (
@@ -490,7 +576,7 @@ export function Recognition({
                     <label key={key}>
                       {label}
                       <select
-                        value={p.services?.[key] || (key === 'sevenDay' ? '按平台规则' : '否')}
+                        value={p.services?.[key] ?? (key === 'sevenDay' ? '按平台规则' : '否')}
                         onChange={(e) =>
                           update((p) => ({
                             ...p,
@@ -504,6 +590,7 @@ export function Recognition({
                           }))
                         }
                       >
+                        {p.services?.[key] === '' ? <option value="">未读取，请确认</option> : null}
                         {['是', '否', '按平台规则'].map((v) => (
                           <option key={v}>{v}</option>
                         ))}
@@ -517,7 +604,8 @@ export function Recognition({
               <h3>商品图片</h3>
             </div>
             <p className="quiet-note">
-              Excel 内的图片会自动提取。也可在对应区域直接添加或替换图片。
+              可批量添加轮播图和详情图，无需先插进 Excel。核对顺序后，点击“导出当前商品
+              Excel”，系统会自动嵌入图片。
             </p>
             <PictureEditor
               product={p}
@@ -581,6 +669,27 @@ export function Recognition({
           </fieldset>
         </div>
       </Modal>
+      {showImageIssues ? (
+        <Modal
+          title="图片校验问题"
+          subtitle={`${imageIssues.length} 项，请核对后重新选择图片`}
+          onClose={() => setShowImageIssues(false)}
+          footer={
+            <button className="button primary" onClick={() => setShowImageIssues(false)}>
+              返回选图
+            </button>
+          }
+        >
+          <div className="modal-body image-issues-list">
+            <p>本次选择的图片未加入商品，原有图片保持不变。</p>
+            <ul>
+              {imageIssues.map((issue, i) => (
+                <li key={i}>{issue}</li>
+              ))}
+            </ul>
+          </div>
+        </Modal>
+      ) : null}
       {reviewIssues ? (
         <Modal
           title="商品资料还需补充"
@@ -800,13 +909,23 @@ export function ShopManagement({
   shops: Shop[];
   selectedId: string;
   onSelect: (id: string) => void;
-  onAdd: () => void;
+  onAdd: (platform: PlatformId) => void;
   onEdit: (shop: Shop) => void;
   onLogin: (shop: Shop) => void;
   disabled: boolean;
 }) {
   const [search, setSearch] = useState('');
-  const visible = shops.filter((shop) =>
+  const [platform, setPlatform] = useState<PlatformId>(() =>
+    normalizePlatform(shops.find((shop) => shop.id === selectedId)?.platform),
+  );
+  // 选中店铺变化时（含刚在另一平台新增店铺）跟随切换到对应平台。
+  useEffect(() => {
+    const shop = shops.find((s) => s.id === selectedId);
+    if (shop) setPlatform(normalizePlatform(shop.platform));
+  }, [selectedId, shops]);
+  const meta = platformMeta(platform);
+  const all = shops.filter((shop) => normalizePlatform(shop.platform) === platform);
+  const visible = all.filter((shop) =>
     `${shop.name} ${shop.account}`.toLowerCase().includes(search.trim().toLowerCase()),
   );
   const current = visible.find((shop) => shop.id === selectedId) || visible[0];
@@ -821,26 +940,49 @@ export function ShopManagement({
       <div className="platform-workspace">
         <aside className="platform-panel" aria-label="店铺平台">
           <h2>平台</h2>
-          <button className="platform-entry active" aria-current="true">
-            <span className="platform-icon">
-              <Store size={19} />
-            </span>
-            <span>
-              <strong>拼多多</strong>
-              <small>已保存 {shops.length} 家店铺</small>
-            </span>
-          </button>
+          {PLATFORM_ORDER.map((id) => {
+            const item = PLATFORMS[id];
+            const count = shops.filter((shop) => normalizePlatform(shop.platform) === id).length;
+            return (
+              <button
+                key={id}
+                className={`platform-entry ${platform === id ? 'active' : ''}`}
+                aria-current={platform === id ? 'true' : undefined}
+                disabled={disabled}
+                onClick={() => {
+                  setPlatform(id);
+                  setSearch('');
+                }}
+              >
+                <span className="platform-icon">
+                  <Store size={19} />
+                </span>
+                <span>
+                  <strong>{item.label}</strong>
+                  <small>
+                    {!item.enabled
+                      ? '暂未开放'
+                      : count
+                        ? `已保存 ${count} 家店铺`
+                        : item.draftPublishing
+                          ? '尚未保存店铺'
+                          : '适配中：仅登录与核对'}
+                  </small>
+                </span>
+              </button>
+            );
+          })}
           <p>按平台管理店铺，商品保存后再选择目标店铺。</p>
         </aside>
-        <section className="account-panel" aria-label="拼多多店铺">
+        <section className="account-panel" aria-label={`${meta.label}店铺`}>
           <header className="account-panel-head">
             <h2>
-              拼多多店铺 <span className="count-pill">{shops.length}</span>
+              {meta.label}店铺 <span className="count-pill">{all.length}</span>
             </h2>
             <div className="button-group">
               <button
                 className="button"
-                disabled={!current?.credentialsSaved || disabled}
+                disabled={!current?.credentialsSaved || disabled || !meta.enabled}
                 onClick={() => current && onLogin(current)}
               >
                 <LogIn size={15} />
@@ -848,7 +990,7 @@ export function ShopManagement({
               </button>
               <button
                 className="button"
-                disabled={!current || disabled}
+                disabled={!current || disabled || !meta.enabled}
                 onClick={() => current && onEdit(current)}
               >
                 <Pencil size={15} />
@@ -856,10 +998,10 @@ export function ShopManagement({
               </button>
               <button
                 className="button primary"
-                disabled={disabled}
+                disabled={disabled || !meta.enabled}
                 onClick={() => {
                   setSearch('');
-                  onAdd();
+                  onAdd(platform);
                 }}
               >
                 <Plus size={16} />
@@ -867,8 +1009,18 @@ export function ShopManagement({
               </button>
             </div>
           </header>
+          {!meta.enabled || !meta.draftPublishing ? (
+            <div className="connection-note" role="status">
+              <AlertCircle size={16} />
+              <p>
+                {!meta.enabled
+                  ? `${meta.label}暂未开放，已有资料保留；目前仅支持拼多多。`
+                  : meta.draftPendingMessage}
+              </p>
+            </div>
+          ) : null}
           <div className="account-toolbar">
-            <span>{search ? `找到 ${visible.length} 家店铺` : `共 ${shops.length} 家店铺`}</span>
+            <span>{search ? `找到 ${visible.length} 家店铺` : `共 ${all.length} 家店铺`}</span>
             <label className="search">
               <Search size={16} />
               <input
@@ -931,7 +1083,7 @@ export function ShopManagement({
                       <td className="align-right">
                         <button
                           className="text-button"
-                          disabled={disabled}
+                          disabled={disabled || !meta.enabled}
                           onClick={() => {
                             onSelect(shop.id);
                             onEdit(shop);
@@ -950,14 +1102,24 @@ export function ShopManagement({
               <span className="empty-symbol">
                 <Store size={31} />
               </span>
-              <h3>{shops.length ? '没有匹配的店铺' : '添加你的第一家拼多多店铺'}</h3>
+              <h3>
+                {!meta.enabled
+                  ? `${meta.label}暂未开放`
+                  : all.length
+                    ? '没有匹配的店铺'
+                    : `添加你的第一家${meta.label}店铺`}
+              </h3>
               <p>
-                {shops.length
-                  ? '试试其他店铺名称或登录账号。'
-                  : '填写店铺名:子账号和密码，店铺名称会自动生成。'}
+                {!meta.enabled
+                  ? '目前仅支持拼多多，已有店铺资料仍保存在本机。'
+                  : all.length
+                    ? '试试其他店铺名称或登录账号。'
+                    : meta.derivesNameFromAccount
+                      ? '填写店铺名:子账号和密码，店铺名称会自动生成。'
+                      : `填写${meta.label}店铺名称、${meta.accountExample}和密码。`}
               </p>
-              {!shops.length ? (
-                <button className="button" disabled={disabled} onClick={onAdd}>
+              {!all.length && meta.enabled ? (
+                <button className="button" disabled={disabled} onClick={() => onAdd(platform)}>
                   <Plus size={16} />
                   添加店铺
                 </button>
@@ -985,15 +1147,22 @@ export function ShopManagement({
 }
 export function ShopEditor({
   initial,
+  platform = DEFAULT_PLATFORM,
   onClose,
   onSaved,
   encryptionAvailable,
 }: {
   initial?: Shop;
+  /** 新增店铺时的默认平台；已有店铺固定沿用自身平台。 */
+  platform?: PlatformId;
   onClose: () => void;
   onSaved: (shopId: string) => Promise<void>;
   encryptionAvailable: boolean;
 }) {
+  const [chosenPlatform, setChosenPlatform] = useState<PlatformId>(() =>
+    normalizePlatform(initial?.platform ?? platform),
+  );
+  const meta = platformMeta(chosenPlatform);
   const [form, setForm] = useState<ShopInput>({
     id: initial?.id,
     name: initial?.name || '',
@@ -1011,14 +1180,20 @@ export function ShopEditor({
   const requestClose = () => {
     if (!busy) dirty ? setClosing(true) : onClose();
   };
-  const shopName = initial ? form.name : shopNameFromAccount(form.account);
+  // 拼多多的店铺名由「店铺名:子账号」推导；淘宝账号是会员名或手机号，名称须手填。
+  const nameEditable = !!initial || !meta.derivesNameFromAccount;
+  const shopName = nameEditable ? form.name : shopNameFromAccount(form.account);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError('');
     try {
-      const name = resolveShopName(form.name, form.account, !initial);
-      const workspace = await window.desktop.saveShop({ ...form, name });
+      const name = resolveShopName(form.name, form.account, !initial, chosenPlatform);
+      const workspace = await window.desktop.saveShop({
+        ...form,
+        name,
+        platform: chosenPlatform,
+      });
       setForm((f) => ({ ...f, password: '' }));
       const saved = workspace.shops.find((shop) => shop.account === form.account.trim());
       if (!saved) throw Error('店铺已保存，请重新打开店铺管理核对');
@@ -1039,21 +1214,50 @@ export function ShopEditor({
               <span className="platform-icon">
                 <Store size={18} />
               </span>
-              <h3>拼多多店铺</h3>
+              <h3>{meta.label}店铺</h3>
             </div>
+            {!initial ? (
+              <div className="platform-choice" role="radiogroup" aria-label="店铺平台">
+                {PLATFORM_ORDER.map((id) => (
+                  <button
+                    type="button"
+                    key={id}
+                    role="radio"
+                    aria-checked={chosenPlatform === id}
+                    className={`platform-option ${chosenPlatform === id ? 'active' : ''}`}
+                    disabled={busy || !PLATFORMS[id].enabled}
+                    onClick={() => setChosenPlatform(id)}
+                  >
+                    <strong>{PLATFORMS[id].label}</strong>
+                    <small>
+                      {!PLATFORMS[id].enabled
+                        ? '暂未开放'
+                        : PLATFORMS[id].draftPublishing
+                          ? '可保存商品草稿'
+                          : '适配中：仅登录与核对'}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {!meta.enabled || !meta.draftPublishing ? (
+              <p className="quiet-note">
+                {!meta.enabled ? `${meta.label}暂未开放` : meta.draftPendingMessage}
+              </p>
+            ) : null}
             {error ? (
               <div className="error-message" role="alert">
                 {error}
               </div>
             ) : null}
-            <fieldset disabled={busy}>
+            <fieldset disabled={busy || !meta.enabled}>
               <label>
                 店铺名称
                 <input
-                  data-autofocus={initial ? '' : undefined}
+                  data-autofocus={nameEditable ? '' : undefined}
                   value={shopName}
-                  readOnly={!initial}
-                  required={!!initial}
+                  readOnly={!nameEditable}
+                  required={nameEditable}
                   maxLength={50}
                   placeholder={
                     initial ? '填写与后台一致的店铺名称' : '由登录账号中冒号前的店铺名自动生成'
@@ -1070,9 +1274,7 @@ export function ShopEditor({
                   maxLength={100}
                   autoComplete="username"
                   aria-describedby={!initial ? 'account-format' : undefined}
-                  placeholder={
-                    initial ? '填写该店铺的商家账号或手机号' : '例如：日用生活馆:运营账号'
-                  }
+                  placeholder={meta.accountExample}
                   onChange={(e) => setForm((f) => ({ ...f, account: e.target.value }))}
                 />
               </label>
@@ -1091,7 +1293,7 @@ export function ShopEditor({
             </fieldset>
             {!initial ? (
               <p className="quiet-note" id="account-format">
-                账号格式：店铺名:子账号，店铺名称自动取冒号前的文字。
+                {meta.accountHint}
               </p>
             ) : null}
             <p className="quiet-note">
@@ -1111,7 +1313,7 @@ export function ShopEditor({
               <button
                 className="button primary"
                 type="submit"
-                disabled={busy || (!encryptionAvailable && !!form.password)}
+                disabled={busy || !meta.enabled || (!encryptionAvailable && !!form.password)}
               >
                 {busy ? '保存中…' : '保存店铺'}
               </button>
@@ -1171,6 +1373,7 @@ export function ShopPicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
+  const chosenMeta = platformMeta(shops.find((shop) => shop.id === chosen)?.platform);
   return (
     <>
       <Modal
@@ -1180,10 +1383,18 @@ export function ShopPicker({
         busy={busy || adding}
         footer={
           <>
-            <span className="footer-note">在已连接浏览器中填写，保存到后台草稿箱</span>
+            <span className="footer-note">
+              {chosen && (!chosenMeta.enabled || !chosenMeta.draftPublishing)
+                ? !chosenMeta.enabled
+                  ? `${chosenMeta.label}暂未开放`
+                  : chosenMeta.draftPendingMessage
+                : '在已连接浏览器中填写，保存到后台草稿箱'}
+            </span>
             <button
               className="button primary"
-              disabled={!chosen || busy || adding}
+              disabled={
+                !chosen || busy || adding || !chosenMeta.enabled || !chosenMeta.draftPublishing
+              }
               onClick={async () => {
                 setBusy(true);
                 setError('');
@@ -1216,26 +1427,37 @@ export function ShopPicker({
           </div>
           {shops.length ? (
             <div className="shop-options">
-              {shops.map((shop) => (
-                <label
-                  className={`shop-option ${chosen === shop.id ? 'selected' : ''}`}
-                  key={shop.id}
-                >
-                  <input
-                    type="radio"
-                    name="target-shop"
-                    value={shop.id}
-                    checked={chosen === shop.id}
-                    disabled={busy}
-                    onChange={() => setChosen(shop.id)}
-                  />
-                  <div>
-                    <strong>{shop.name}</strong>
-                    <span>{maskAccount(shop.account)}</span>
-                  </div>
-                  <span className="status neutral">密码已保存</span>
-                </label>
-              ))}
+              {shops.map((shop) => {
+                const shopMeta = platformMeta(shop.platform);
+                return (
+                  <label
+                    className={`shop-option ${chosen === shop.id ? 'selected' : ''}`}
+                    key={shop.id}
+                  >
+                    <input
+                      type="radio"
+                      name="target-shop"
+                      value={shop.id}
+                      checked={chosen === shop.id}
+                      disabled={busy || !shopMeta.enabled || !shopMeta.draftPublishing}
+                      onChange={() => setChosen(shop.id)}
+                    />
+                    <div>
+                      <strong>
+                        {shop.name} <span className="status neutral">{shopMeta.label}</span>
+                      </strong>
+                      <span>{maskAccount(shop.account)}</span>
+                    </div>
+                    <span className="status neutral">
+                      {!shopMeta.enabled
+                        ? '暂未开放'
+                        : shopMeta.draftPublishing
+                          ? '密码已保存'
+                          : '仅登录与核对'}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
           ) : (
             <p>点击“添加店铺”保存账号密码，完成后会回到这里并选中新店铺。</p>
@@ -1247,7 +1469,7 @@ export function ShopPicker({
               扩展的浏览器。已有正确登录状态时直接继续；需要切店时使用保存的账号密码，验证码需人工完成。
             </p>
           </div>
-          {chosen ? (
+          {chosen && chosenMeta.enabled && chosenMeta.draftPublishing ? (
             <section className="preflight-note">
               <strong>所选店铺执行前还需核验</strong>
               <ul>

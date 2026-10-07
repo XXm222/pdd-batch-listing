@@ -13,18 +13,30 @@ import {
 } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { Store } from './store';
 import { prepareTasks, TaskRunner } from './task-runner';
-import { PddAdapter } from './platforms/pdd-adapter';
-import { ShopLoginError } from './platforms/pdd-login';
+import { PlatformRegistry } from './platforms/registry';
+import { ShopLoginError } from './platforms/shop-login';
 import { ExecutionError } from './execution';
+import {
+  DEFAULT_PLATFORM,
+  normalizePlatform,
+  platformMeta,
+  requireEnabledPlatform,
+} from '../src/platforms';
 import { sanitizeProducts } from './product-service';
 import { ShopService } from './shop-service';
 import { AgentService } from './agent-service';
 import { BridgeSetup, ensureBrowserReady } from './bridge-setup';
 import { exportBrowserExtension } from './browser-installation';
+import { exportProductWorkbook } from './workbook-export';
+import { ShopCollector } from './shop-collector';
+import { AppUpdater } from './app-updater';
+import { prepareAutomaticInstall, acknowledgeAutomaticInstall } from './auto-install';
+import { isTaobaoProduct, safeImageName } from '../src/domain';
 import type {
   AgentConfigInput,
   Asset,
@@ -49,11 +61,16 @@ let window: BrowserWindow | null = null;
 let store: Store;
 let encryptionAvailable = false;
 let importing = false;
+let exporting = false;
+let installingUpdate = false;
+let updater: AppUpdater;
+let updateTimer: NodeJS.Timeout | undefined;
 let serial = Promise.resolve();
 let runner: TaskRunner;
 let agent: AgentService;
 let shopLoginBusy = false;
 let lastLoginShopId = '';
+let collector: ShopCollector;
 const root = () => app.getAppPath();
 const resource = (...segments: string[]) =>
   path.join(
@@ -167,6 +184,7 @@ function handler(name: string, fn: (input: any) => any, mutation = false) {
       return { ok: false, error: '调用来源不正确' };
     const run = async () => {
       try {
+        if (installingUpdate) throw Error('正在打开更新安装包，请稍候');
         return { ok: true, data: await fn(input) };
       } catch (error) {
         recordError(
@@ -174,7 +192,11 @@ function handler(name: string, fn: (input: any) => any, mutation = false) {
           `IPC:${name}`,
           error,
         );
-        return { ok: false, error: error instanceof Error ? error.message : '操作失败，请重试' };
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : '操作失败，请重试',
+          imageIssues: (error as { imageIssues?: string[] })?.imageIssues,
+        };
       }
     };
     if (!mutation) return run();
@@ -223,29 +245,43 @@ else {
   app
     .whenReady()
     .then(async () => {
+      await acknowledgeAutomaticInstall(
+        path.join(app.getPath('userData'), 'updates'),
+        app.getVersion(),
+        app.getPath('exe'),
+        false,
+      );
       store = await Store.open(app.getPath('userData'));
       const bridgeSetup = new BridgeSetup(resource());
-      const requireBrowser = async () => {
-        const status = await ensureBrowserReady(bridgeSetup, () =>
-          shell.openExternal('https://mms.pinduoduo.com/home/'),
-        );
+      const requireBrowser = async (platform: unknown = DEFAULT_PLATFORM) => {
+        const meta = requireEnabledPlatform(platform);
+        const status = await ensureBrowserReady(bridgeSetup, () => shell.openExternal(meta.portal));
         if (status.state !== 'ready')
           throw new Error(
             `浏览器连接未就绪：${status.message}。请打开“浏览器连接”查看安装教程并重新检测`,
           );
       };
-      const pdd = new PddAdapter(app.getPath('userData'), async (shop) => {
+      const platformForTasks = (ids: unknown) => {
+        const task = store
+          .all<Task>('tasks')
+          .find((t) => Array.isArray(ids) && t.id === (ids as string[])[0]);
+        return (
+          task?.platform ?? store.all<Shop>('shops').find((s) => s.id === task?.shopId)?.platform
+        );
+      };
+      const decryptShopPassword = async (shop: Shop) => {
         const secret = store.secret(shop.id);
         if (!secret) throw new Error('店铺密码未保存，请到店铺管理补充');
         const decrypted = await safeStorage.decryptStringAsync(Buffer.from(secret, 'base64'));
         if (decrypted.shouldReEncrypt)
           store.saveShop(shop, await timedEncryption(decrypted.result));
         return decrypted.result;
-      });
+      };
+      const platforms = new PlatformRegistry(app.getPath('userData'), decryptShopPassword);
       runner = new TaskRunner(
         store,
         app.getPath('userData'),
-        pdd,
+        (shop) => platforms.adapterFor(shop),
         (error) => {
           recordError(
             path.join(app.getPath('userData'), 'operation-timings.jsonl'),
@@ -276,11 +312,151 @@ else {
         timedEncryption,
         async (secret) =>
           (await safeStorage.decryptStringAsync(Buffer.from(secret, 'base64'))).result,
-        () => runner.isActive || shopLoginBusy,
-        (t, s) => pdd.inspectDiagnosis(t, s),
-        (t, s, name) => pdd.recoverPage(t, s, name),
+        () => runner.isActive || shopLoginBusy || collector?.busy,
+        (t, s) => platforms.forShop(s).inspectDiagnosis(t, s),
+        (t, s, name) => platforms.forShop(s).recoverPage(t, s, name),
       );
       agent.recover();
+      updater = new AppUpdater(
+        app.getVersion(),
+        path.join(app.getPath('userData'), 'updates'),
+        (state) => {
+          if (window && !window.isDestroyed()) window.webContents.send('updates:changed', state);
+        },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        fs.readFileSync(resource('updates', 'release-public.pem'), 'utf8'),
+        fs.readFileSync(resource('release-notes.txt'), 'utf8').trim(),
+      );
+      handler('updates:state', () => updater.state);
+      handler('updates:check', () => updater.check());
+      handler('updates:download', () => updater.download());
+      handler('updates:cancel', () => updater.cancel());
+      const guardUpdate = () => {
+        if (
+          runner.isActive ||
+          agent.busy ||
+          shopLoginBusy ||
+          importing ||
+          exporting ||
+          collector?.busy
+        )
+          throw Error('请等待商品任务、登录及资料处理结束后再更新');
+      };
+      handler('updates:install', async () => {
+        guardUpdate();
+        if (updater.state.status !== 'ready') {
+          const state = await updater.download();
+          if (state.status !== 'ready') throw Error(state.message || '更新包未下载完成');
+        }
+        guardUpdate();
+        const { file, release } = await updater.automaticInstallation();
+        installingUpdate = true;
+        try {
+          const launch = await prepareAutomaticInstall(
+            file,
+            release,
+            app.getPath('exe'),
+            path.join(app.getPath('userData'), 'updates'),
+            resource('updates'),
+          );
+          await launch();
+          app.quit();
+        } catch (error) {
+          installingUpdate = false;
+          throw error;
+        }
+      });
+      handler('updates:manual', async () => {
+        guardUpdate();
+        const file = await updater.installationPath();
+        guardUpdate();
+        installingUpdate = true;
+        try {
+          const error = await shell.openPath(file);
+          if (error) throw Error('无法打开安装包，请重新下载后重试');
+          app.quit();
+        } catch (error) {
+          installingUpdate = false;
+          throw error;
+        }
+      });
+      handler('products:export', async (raw: unknown) => {
+        if (exporting) throw Error('正在生成 Excel，请稍候');
+        exporting = true;
+        try {
+          const [p] = sanitizeProducts(store, [raw]);
+          const original = raw as Product;
+          if (isTaobaoProduct(p)) {
+            if (typeof original.outerId !== 'string' && original.outerId !== undefined)
+              throw Error('商家编码格式不正确');
+            p.outerId = original.outerId || '';
+            if (p.outerId.length > 2000) throw Error('商家编码过长');
+            if (!original.taobao || typeof original.taobao !== 'object')
+              throw Error('淘宝发品设置尚未填写');
+            p.taobao = { ...original.taobao };
+            for (const key of [
+              'originProvince',
+              'originCity',
+              'extractWay',
+              'freightBearer',
+              'deliveryTime',
+              'shelfTime',
+              'auctionPoint',
+            ] as const)
+              if (typeof p.taobao[key] !== 'string' || p.taobao[key].length > 200)
+                throw Error('淘宝发品设置格式不正确');
+            const known = new Map(store.all<Asset>('assets').map((a) => [a.id, a]));
+            for (const key of ['threeToFour', 'whiteBg', 'usp'] as const) {
+              const names = original[key] || [];
+              if (
+                !Array.isArray(names) ||
+                names.length > 5 ||
+                names.some((name) => !safeImageName(name))
+              )
+                throw Error('图片清单格式不正确');
+              p[key] = [...names];
+              for (const name of names) {
+                const id = original.images?.[name]?.id;
+                if (id && known.has(id)) p.images[name] = { ...known.get(id)!, name };
+              }
+            }
+          }
+          const selected = await dialog.showSaveDialog(window!, {
+            title: '导出含图片 Excel',
+            defaultPath: path.join(
+              app.getPath('documents'),
+              `${p.code.replace(/[\\/:*?"<>|]/g, '-')}-含图片.xlsx`,
+            ),
+            filters: [{ name: 'Excel 商品资料', extensions: ['xlsx'] }],
+          });
+          if (selected.canceled || !selected.filePath) return null;
+          const bytes = await measureLocal('生成含图片 Excel', () =>
+            exportProductWorkbook(
+              p,
+              resource(
+                'templates',
+                isTaobaoProduct(p) ? '淘宝商品资料模板.xlsx' : '商品资料模板.xlsx',
+              ),
+              assetsDir(),
+            ),
+          );
+          // Construct the complete file before replacing the operator's selected destination.
+          const temporary = `${selected.filePath}.${randomUUID()}.tmp`;
+          try {
+            await fs.promises.writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 });
+            await fs.promises.rename(temporary, selected.filePath);
+          } finally {
+            await fs.promises.rm(temporary, { force: true }).catch(() => {});
+          }
+          shell.showItemInFolder(selected.filePath);
+          return selected.filePath;
+        } finally {
+          exporting = false;
+        }
+      });
       store.onTaskChanged((task) => {
         if (window && !window.isDestroyed()) window.webContents.send('tasks:changed', task);
       });
@@ -393,14 +569,98 @@ else {
         if (selected.filePaths.length > 60) throw new Error('每次最多补充 60 张图片');
         const { saveImage } = await import('./importer');
         const assets: Asset[] = [];
-        for (const file of selected.filePaths) assets.push(await saveImage(file, assetsDir()));
+        const imageIssues: string[] = [];
+        for (const file of selected.filePaths) {
+          try {
+            assets.push(await saveImage(file, assetsDir()));
+          } catch (error) {
+            imageIssues.push((error as Error).message);
+          }
+        }
+        if (imageIssues.length)
+          throw Object.assign(
+            new Error(`所选图片未添加，${imageIssues.length} 张图片无法读取，请查看完整列表`),
+            { imageIssues },
+          );
         store.saveAssets(assets);
         return assets;
       });
       const guardAgent = () => {
+        if (collector?.busy) throw new Error('正在采集店铺商品，请等待采集结束或停止采集');
         if (shopLoginBusy) throw new Error('正在登录并核对店铺，请等待登录结束');
         if (agent.busy) throw new Error('Agent 正在读取和诊断任务，请等待诊断结束');
       };
+      collector = new ShopCollector(
+        path.join(app.getPath('userData'), 'collection-cache'),
+        resource('templates', '商品资料模板.xlsx'),
+        decryptShopPassword,
+        (state) => {
+          if (window && !window.isDestroyed()) window.webContents.send('collection:changed', state);
+        },
+        (shop) =>
+          store
+            .all<Shop>('shops')
+            .some(
+              (current) =>
+                current.id === shop.id &&
+                current.updatedAt === shop.updatedAt &&
+                normalizePlatform(current.platform) === 'pdd',
+            ),
+      );
+      handler('collection:state', () => collector.state);
+      handler('collection:cancel', () => collector.cancel());
+      handler(
+        'collection:list',
+        async (id: unknown) => {
+          guardAgent();
+          if (runner.isActive) throw Error('请等待当前商品任务结束，再采集店铺');
+          const shop = store.all<Shop>('shops').find((s) => s.id === id);
+          if (!shop?.credentialsSaved) throw Error('请先到店铺管理保存账号密码');
+          requireEnabledPlatform(shop.platform);
+          return collector.list(shop);
+        },
+        true,
+      );
+      handler(
+        'collection:export',
+        async (ids: unknown) => {
+          guardAgent();
+          if (runner.isActive) throw Error('请等待当前商品任务结束，再导出店铺商品');
+          if (
+            !Array.isArray(ids) ||
+            !ids.length ||
+            ids.length > 50 ||
+            ids.some((id) => typeof id !== 'string') ||
+            new Set(ids).size !== ids.length
+          )
+            throw Error('一次请选择 1 至 50 件商品导出');
+          if (ids.some((id) => !collector.state.goods.some((g) => g.goodsId === id)))
+            throw Error('所选商品不在当前店铺列表');
+          const single = ids.length === 1;
+          const name = collector.state.shopName.replace(/[\\/:*?"<>|]/g, '-').slice(0, 40);
+          const selected = await dialog.showSaveDialog(window!, {
+            title: single ? '保存商品 Excel' : '保存商品 Excel 压缩包',
+            defaultPath: path.join(
+              app.getPath('documents'),
+              `${name}-${single ? ids[0] : '商品资料'}-${Date.now()}.${single ? 'xlsx' : 'zip'}`,
+            ),
+            filters: [
+              {
+                name: single ? '含图片 Excel' : 'Excel 压缩包',
+                extensions: [single ? 'xlsx' : 'zip'],
+              },
+            ],
+          });
+          if (selected.canceled || !selected.filePath) return null;
+          guardAgent();
+          return collector.export(ids, selected.filePath);
+        },
+        true,
+      );
+      handler('collection:folder', () => {
+        if (collector.state.outputPath && fs.existsSync(collector.state.outputPath))
+          shell.showItemInFolder(collector.state.outputPath);
+      });
       handler(
         'products:save',
         (input: unknown) =>
@@ -429,9 +689,10 @@ else {
             throw new Error('登录参数不正确');
           const shop = store.all<Shop>('shops').find((s) => s.id === input.id);
           if (!shop?.credentialsSaved) throw new Error('请先保存店铺账号密码');
+          requireEnabledPlatform(shop.platform);
           if (input.mode === 'check' && lastLoginShopId !== shop.id)
             throw new Error('请先开始该店铺的重新登录');
-          await requireBrowser();
+          await requireBrowser(shop.platform);
           guardAgent();
           if (runner.isActive) throw new Error('请先停止商品任务，再切换登录账号');
           // Recheck after connection detection, then reserve the browser before login work.
@@ -451,7 +712,7 @@ else {
           };
           emit();
           try {
-            await pdd.verifyLogin(shop, input.mode, (event) => {
+            await platforms.forShop(shop).verifyLogin(shop, input.mode, (event) => {
               const index = result.events.findIndex(
                 (e) => e.name === event.name && e.startedAt === event.startedAt,
               );
@@ -461,9 +722,12 @@ else {
               emit();
             });
             result.status = 'succeeded';
-            result.message = shop.account.includes(':')
-              ? `已登录并核对“${shop.name}”及子账号`
-              : `已登录并核对“${shop.name}”；后台未提供可完整核对的登录账号`;
+            result.message =
+              normalizePlatform(shop.platform) === 'taobao'
+                ? `已登录千牛并核对店铺“${shop.name}”`
+                : shop.account.includes(':')
+                  ? `已登录并核对“${shop.name}”及子账号`
+                  : `已登录并核对“${shop.name}”；后台未提供可完整核对的登录账号`;
           } catch (error) {
             result.status = error instanceof ShopLoginError ? error.loginStatus : 'failed';
             result.errorCode = error instanceof ExecutionError ? error.code : undefined;
@@ -493,7 +757,9 @@ else {
           measureLocal('选择店铺并建立任务', async () => {
             guardAgent();
             if (runner.isActive) throw new Error('已连接浏览器正在执行，请等待当前任务结束');
-            await requireBrowser();
+            await requireBrowser(
+              store.all<Shop>('shops').find((s) => s.id === input?.shopId)?.platform,
+            );
             guardAgent();
             if (runner.isActive) throw new Error('已连接浏览器正在执行，请等待当前任务结束');
             const taskIds = prepareTasks(store, input);
@@ -505,7 +771,7 @@ else {
         'tasks:run',
         async (ids: string[]) => {
           guardAgent();
-          await requireBrowser();
+          await requireBrowser(platformForTasks(ids));
           guardAgent();
           runner.start(ids);
           return workspace();
@@ -516,7 +782,7 @@ else {
         'tasks:resume',
         async (id: string) => {
           guardAgent();
-          await requireBrowser();
+          await requireBrowser(platformForTasks([id]));
           guardAgent();
           runner.start([id]);
           return workspace();
@@ -527,7 +793,7 @@ else {
         'tasks:restart',
         async (id: string) => {
           guardAgent();
-          await requireBrowser();
+          await requireBrowser(platformForTasks([id]));
           guardAgent();
           runner.start([id], true);
           return workspace();
@@ -615,18 +881,31 @@ else {
         if (!t?.evidence) throw new Error('尚无草稿保存截图');
         await shell.openPath(t.evidence);
       });
-      handler('template:download', async (kind: 'blank' | 'example' = 'blank') => {
-        if (!['blank', 'example'].includes(kind)) throw new Error('请选择空白模板或填写示例');
-        const name = kind === 'example' ? '商品资料示例.xlsx' : '商品资料模板.xlsx';
-        const result = await dialog.showSaveDialog(window!, {
-          title: kind === 'example' ? '保存商品资料示例' : '保存商品资料模板',
-          defaultPath: path.join(app.getPath('downloads'), name),
-          filters: [{ name: 'Excel', extensions: ['xlsx'] }],
-        });
-        if (result.canceled || !result.filePath) return false;
-        fs.copyFileSync(resource('templates', name), result.filePath);
-        return true;
-      });
+      handler(
+        'template:download',
+        async (input: { kind?: 'blank' | 'example'; platform?: unknown } = {}) => {
+          const kind = input?.kind === 'example' ? 'example' : 'blank';
+          const platform = normalizePlatform(input?.platform);
+          requireEnabledPlatform(platform);
+          // 拼多多与天猫的发品表单字段不同，模板不能通用，各带一份。
+          const names: Record<string, { blank: string; example: string }> = {
+            pdd: { blank: '商品资料模板.xlsx', example: '商品资料示例.xlsx' },
+            taobao: { blank: '淘宝商品资料模板.xlsx', example: '淘宝商品资料示例.xlsx' },
+          };
+          const name = (names[platform] || names.pdd)[kind];
+          const label = platformMeta(platform).label;
+          const result = await dialog.showSaveDialog(window!, {
+            title: kind === 'example' ? `保存${label}商品资料示例` : `保存${label}商品资料模板`,
+            defaultPath: path.join(app.getPath('downloads'), name),
+            filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+          });
+          if (result.canceled || !result.filePath) return false;
+          const source = resource('templates', name);
+          if (!fs.existsSync(source)) throw new Error(`安装包缺少${label}模板文件：${name}`);
+          fs.copyFileSync(source, result.filePath);
+          return true;
+        },
+      );
       handler('workspace:folder', async () => {
         await shell.openPath(app.getPath('userData'));
       });
@@ -669,6 +948,37 @@ else {
         ]),
       );
       await createWindow();
+      await acknowledgeAutomaticInstall(
+        path.join(app.getPath('userData'), 'updates'),
+        app.getVersion(),
+        app.getPath('exe'),
+      );
+      try {
+        const resultFile = path.join(app.getPath('userData'), 'updates/install-result.json');
+        const result = JSON.parse(fs.readFileSync(resultFile, 'utf8').replace(/^\uFEFF/, ''));
+        if (result.status === 'error') {
+          fs.renameSync(resultFile, `${resultFile}.${Date.now()}.handled`);
+          void dialog.showMessageBox(window!, {
+            type: 'error',
+            title: '自动更新未完成',
+            message: '请重试更新或选择手动安装，已保存的商品与店铺数据保留。',
+          });
+        }
+      } catch {
+        /* No previous installation failure. */
+      }
+      void updater.check();
+      updateTimer = setInterval(
+        () => {
+          if (
+            !installingUpdate &&
+            !['ready', 'downloading', 'checking'].includes(updater.state.status)
+          )
+            void updater.check();
+        },
+        30 * 60 * 1000,
+      );
+      updateTimer.unref();
       app.on('activate', () => {
         if (!window) void createWindow();
       });
@@ -684,6 +994,9 @@ else {
     if (process.platform !== 'darwin') app.quit();
   });
   app.on('before-quit', () => {
+    collector?.cancel();
+    if (updateTimer) clearInterval(updateTimer);
+    updater?.cancel();
     store?.close();
   });
 }

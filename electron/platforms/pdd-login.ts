@@ -1,7 +1,10 @@
 import type { BrowserBridge } from '../browser-bridge';
 import { ExecutionError } from '../execution';
+import { ShopLoginError } from './shop-login';
 import { matchesPddIdentity, completePddIdentities, isPddLoginConfirmed } from './pdd-identity';
-import type { Shop, ShopLoginEvent, ShopLoginStatus } from '../../src/types';
+import type { Shop, ShopLoginEvent } from '../../src/types';
+
+export { ShopLoginError } from './shop-login';
 
 const ORIGIN = 'https://mms.pinduoduo.com';
 type Bridge = Pick<BrowserBridge, 'eval' | 'fill' | 'wait'>;
@@ -24,15 +27,6 @@ type LoginState = {
   rejected: boolean;
   structure?: LoginStructure;
 };
-export class ShopLoginError extends ExecutionError {
-  constructor(
-    public loginStatus: Exclude<ShopLoginStatus, 'running' | 'succeeded'>,
-    message: string,
-    public readonly diagnostics?: LoginStructure,
-  ) {
-    super('login_required', message, 'retry');
-  }
-}
 // Return classifications only. Passwords, cookies and page text never enter progress records.
 export const LOGIN_STATE = `(() => {
   if(location.origin!=='${ORIGIN}')return {trusted:false};

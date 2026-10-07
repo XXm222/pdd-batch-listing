@@ -1,3 +1,5 @@
+import type { PlatformId } from './platforms';
+
 export type Asset = {
   id: string;
   name: string;
@@ -5,6 +7,7 @@ export type Asset = {
   bytes: number;
   width: number;
   height: number;
+  format?: 'png' | 'jpg';
 };
 export type ImageTarget = { kind: 'main' | 'detail' | 'sku'; index?: number };
 export type Sku = {
@@ -18,6 +21,25 @@ export type Sku = {
 };
 export type ProductAttribute = { name: string; value: string; required: boolean };
 export type Services = { sevenDay: string; invoice: string; authenticity: string };
+/**
+ * 淘宝/天猫发品专有设置。拼多多模板没有这些项，因此整体可选：
+ * 只有 `taobao` 存在时，才是淘宝模板导入的商品。
+ */
+export type TaobaoListing = {
+  /** 发货地，天猫必填且必须级联到市。 */
+  originProvince: string;
+  originCity: string;
+  /** 提取方式：邮寄 / 电子交易凭证。 */
+  extractWay: string;
+  /** 运费承担：卖家承担 / 买家承担。 */
+  freightBearer: string;
+  /** 发货时间：今日发 / 48小时 / 大于48小时。 */
+  deliveryTime: string;
+  /** 上架时间：放入仓库 / 立刻上架 / 定时上架。 */
+  shelfTime: string;
+  /** 返点比例，0.5–1.5，须为 0.5 的整数倍。 */
+  auctionPoint: string;
+};
 export type Product = {
   id: string;
   code: string;
@@ -36,8 +58,16 @@ export type Product = {
   demo: boolean;
   source: string;
   skus: Sku[];
+  /** 商家编码。天猫是独立于货号的选填字段；未填时沿用商品编码。 */
+  outerId?: string;
   main: string[];
   detail: string[];
+  /** 淘宝专有的选填图片位；拼多多商品为空数组。 */
+  threeToFour?: string[];
+  whiteBg?: string[];
+  usp?: string[];
+  /** 淘宝发品设置；拼多多商品为 undefined。 */
+  taobao?: TaobaoListing;
   images: Record<string, Asset>;
   savedAt?: string;
   templateFormat: string;
@@ -51,6 +81,29 @@ export type Shop = {
   account: string;
   credentialsSaved: boolean;
   updatedAt: string;
+  /** 旧资料没有该字段，读取时按拼多多处理，见 platforms.ts。 */
+  platform?: PlatformId;
+};
+export type ShopGoods = {
+  goodsId: string;
+  title: string;
+  thumbnail: string;
+  price: string;
+  editUrl?: string;
+  status?: 'waiting' | 'reading' | 'done' | 'failed' | 'stopped';
+  message?: string;
+};
+export type CollectionState = {
+  shopId: string;
+  shopName: string;
+  status: 'idle' | 'listing' | 'ready' | 'exporting' | 'done' | 'error' | 'cancelled';
+  message: string;
+  goods: ShopGoods[];
+  completeList: boolean;
+  completed: number;
+  total: number;
+  outputPath?: string;
+  exportIds?: string[];
 };
 export type ShopLoginStatus =
   'running' | 'succeeded' | 'verification_required' | 'credentials_rejected' | 'failed';
@@ -119,6 +172,8 @@ export type Task = {
   id: string;
   shopId: string;
   shopName: string;
+  /** 建任务时店铺所属平台；旧任务没有该字段，按店铺当前平台处理。 */
+  platform?: PlatformId;
   code: string;
   title: string;
   status: TaskStatus;
@@ -140,7 +195,7 @@ export type Task = {
   runElapsedMs?: number;
   revision?: number;
   clearedAt?: string | null;
-  shopSnapshot?: { name: string; account: string; updatedAt: string };
+  shopSnapshot?: { name: string; account: string; updatedAt: string; platform?: PlatformId };
   checkpoint?: { step: TaskStep; state: 'running' | 'done'; updatedAt: string };
   error?: {
     code: TaskErrorCode;
@@ -208,7 +263,13 @@ export type Workspace = {
   version: string;
   encryptionAvailable: boolean;
 };
-export type ShopInput = { id?: string; name: string; account: string; password: string };
+export type ShopInput = {
+  id?: string;
+  name: string;
+  account: string;
+  password: string;
+  platform?: PlatformId;
+};
 export type BrowserConnectionStatus = {
   state:
     'ready' | 'extension_disconnected' | 'service_unavailable' | 'version_mismatch' | 'unsupported';
@@ -219,7 +280,43 @@ export type BrowserConnectionStatus = {
   extensionVersion?: string;
   suggestedCommand?: string;
 };
+export type UpdateFile = {
+  platform: string;
+  arch: string;
+  url: string;
+  size: number;
+  sha256: string;
+};
+export type UpdateRelease = {
+  version: string;
+  notes: string;
+  file: UpdateFile;
+  signatureVerified?: boolean;
+};
+export type UpdateState = {
+  status: 'idle' | 'checking' | 'latest' | 'available' | 'downloading' | 'ready' | 'error';
+  currentVersion: string;
+  feedUrl: string;
+  received: number;
+  release?: UpdateRelease;
+  message?: string;
+  currentNotes?: string;
+};
 export interface DesktopApi {
+  collectionState(): Promise<CollectionState>;
+  collectShop(shopId: string): Promise<CollectionState>;
+  exportShopGoods(goodsIds: string[]): Promise<CollectionState | null>;
+  cancelCollection(): Promise<void>;
+  showCollectionFile(): Promise<void>;
+  onCollectionChanged(listener: (state: CollectionState) => void): () => void;
+  exportProduct(product: Product): Promise<string | null>;
+  updateState(): Promise<UpdateState>;
+  checkUpdate(): Promise<UpdateState>;
+  downloadUpdate(): Promise<UpdateState>;
+  cancelUpdate(): Promise<void>;
+  installUpdate(): Promise<void>;
+  openUpdateInstaller(): Promise<void>;
+  onUpdateChanged(listener: (state: UpdateState) => void): () => void;
   browserConnection(): Promise<BrowserConnectionStatus>;
   exportBrowserExtension(): Promise<{ folder: string; zip: string }>;
   copyBrowserExtensionPath(): Promise<{ folder: string; zip: string }>;
@@ -248,7 +345,8 @@ export interface DesktopApi {
   clearTaskRecords(ids: string[]): Promise<Workspace>;
   restoreTaskRecords(ids: string[]): Promise<Workspace>;
   openEvidence(id: string): Promise<void>;
-  downloadTemplate(kind?: 'blank' | 'example'): Promise<boolean>;
+  /** 模板按平台区分：拼多多与天猫的发品表单字段不同，不能共用一份。 */
+  downloadTemplate(kind?: 'blank' | 'example', platform?: PlatformId): Promise<boolean>;
   showDataFolder(): Promise<void>;
   agentConfig(): Promise<AgentConfig>;
   saveAgentConfig(input: AgentConfigInput): Promise<AgentConfig>;

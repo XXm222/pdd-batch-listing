@@ -30,11 +30,26 @@ const closedSessionTab = (error: unknown) =>
     /^No tab with given id \d+\.?$/i.test(error.message));
 export class BrowserBridge {
   private readonly origin: string;
-  constructor(private readonly startUrl: string) {
+  // A platform's login host differs from its workbench host; the tab legitimately
+  // lands on either one, so both count as the target backend.
+  private readonly origins: Set<string>;
+  constructor(
+    private readonly startUrl: string,
+    trustedOrigins: string[] = [],
+  ) {
     const url = new URL(startUrl);
     if (url.protocol !== 'https:' || url.username || url.password)
       throw new Error('后台连接地址须使用不含凭据的 HTTPS 地址');
     this.origin = url.origin;
+    this.origins = new Set([
+      this.origin,
+      ...trustedOrigins.map((value) => {
+        const trusted = new URL(value);
+        if (trusted.protocol !== 'https:' || trusted.username || trusted.password)
+          throw new Error('后台连接地址须使用不含凭据的 HTTPS 地址');
+        return trusted.origin;
+      }),
+    ]);
   }
   private url = 'http://127.0.0.1:10086';
   // The daemon outlives browser/App restarts. Keep one session for this adapter's
@@ -121,7 +136,7 @@ export class BrowserBridge {
       trusted =
         tab?.success === true &&
         Number.isInteger(tab.tabId) &&
-        new URL(tab.url).origin === this.origin;
+        this.origins.has(new URL(tab.url).origin);
     } catch {}
     if (!trusted)
       throw new ExecutionError(

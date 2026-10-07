@@ -21,21 +21,36 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import type { BrowserConnectionStatus, Product, Shop, TaskUpdate, Workspace } from './types';
+import type {
+  BrowserConnectionStatus,
+  Product,
+  Shop,
+  TaskUpdate,
+  Workspace,
+  UpdateState,
+} from './types';
+import { AppUpdates } from './AppUpdates';
+import { ShopCollection } from './ShopCollection';
 import { TaskRecords } from './TaskRecords';
 import { TaskProgress } from './TaskProgress';
 import { batchProgress, taskIsHistory } from './task-progress';
 import { AgentSettings } from './AgentSettings';
 import { ShopLogin } from './ShopLogin';
 import { BrowserSetup } from './BrowserSetup';
-import { lowestPrice, problems } from './domain';
+import { isTaobaoProduct, lowestPrice, problems } from './domain';
+import { DEFAULT_PLATFORM, PLATFORM_ORDER, platformMeta, type PlatformId } from './platforms';
 import { productList } from './product-list';
 import { mergeWorkspace, applyTaskUpdate } from './workspace-state';
 import { TemplateDownload } from './TemplateDownload';
 import { Modal, Recognition, ShopEditor, ShopManagement, ShopPicker, Status } from './components';
 
-type Page = 'products' | 'shops' | 'tasks';
-const pages: Record<Page, string> = { products: '商品资料', shops: '店铺管理', tasks: '执行记录' };
+type Page = 'products' | 'shops' | 'tasks' | 'collection';
+const pages: Record<Page, string> = {
+  products: '商品资料',
+  shops: '店铺管理',
+  tasks: '执行记录',
+  collection: '店铺商品导出',
+};
 const initial: Workspace = {
   products: [],
   shops: [],
@@ -69,6 +84,7 @@ export default function App() {
   const [checkingBrowser, setCheckingBrowser] = useState(false);
   const [agentSettings, setAgentSettings] = useState(false);
   const [shopEditor, setShopEditor] = useState<Shop | 'new' | null>(null);
+  const [newShopPlatform, setNewShopPlatform] = useState<PlatformId>(DEFAULT_PLATFORM);
   const [picking, setPicking] = useState(false);
   const [help, setHelp] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -77,7 +93,49 @@ export default function App() {
   const [fatal, setFatal] = useState('');
   const [listPage, setListPage] = useState(0);
   const [savingTemplate, setSavingTemplate] = useState<'blank' | 'example' | null>(null);
+  const [templatePlatform, setTemplatePlatform] = useState<PlatformId>(DEFAULT_PLATFORM);
   const [folderPending, setFolderPending] = useState(false);
+  const [updatesOpen, setUpdatesOpen] = useState(false);
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null);
+  const [notesSeenVersion, setNotesSeenVersion] = useState(() => {
+    try {
+      return localStorage.getItem('goods-update-notes-seen') || '';
+    } catch {
+      return '';
+    }
+  });
+  const hasNewUpdate = !!updateState?.release;
+  const unreadUpdateNotes =
+    !!data.version && !!updateState?.currentNotes && notesSeenVersion !== data.version;
+  const showUpdates = () => {
+    setUpdatesOpen(true);
+    if (data.version) {
+      setNotesSeenVersion(data.version);
+      try {
+        localStorage.setItem('goods-update-notes-seen', data.version);
+      } catch {
+        /* Optional local read state. */
+      }
+    }
+  };
+  const [exportingId, setExportingId] = useState('');
+  useEffect(() => {
+    if (!window.desktop) return;
+    let alive = true;
+    const off = window.desktop.onUpdateChanged((state) => {
+      if (alive) setUpdateState(state);
+    });
+    void window.desktop
+      .updateState()
+      .then((state) => {
+        if (alive) setUpdateState(state);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
   const [progressIds, setProgressIds] = useState(savedProgressIds);
   const [progressOpen, setProgressOpen] = useState(false);
   const restoredProgress = useRef(false);
@@ -215,11 +273,13 @@ export default function App() {
     if (savingTemplate) return;
     setSavingTemplate(kind);
     try {
-      if (await window.desktop.downloadTemplate(kind))
+      if (await window.desktop.downloadTemplate(kind, templatePlatform))
         setNotice(
-          kind === 'example'
-            ? '填写示例已保存，内含示例数据和图片，供填写时参考'
-            : '空白 Excel 模板已保存，填写后可从“上传 Excel”导入',
+          `${platformMeta(templatePlatform).label}${
+            kind === 'example'
+              ? '填写示例已保存，内含示例数据和图片，供填写时参考'
+              : '空白 Excel 模板已保存，填写后可从“上传 Excel”导入'
+          }`,
         );
     } catch (e) {
       setNotice((e as Error).message);
@@ -228,25 +288,43 @@ export default function App() {
     }
   };
   const downloadButtons = (
-    <div className="button-group">
-      <button
-        className="button"
-        disabled={!!savingTemplate || loading || !!fatal}
-        aria-busy={savingTemplate === 'blank'}
-        onClick={() => download('blank')}
-      >
-        <Download size={16} aria-hidden="true" />
-        {savingTemplate === 'blank' ? '正在保存模板…' : '下载 Excel 模板'}
-      </button>
-      <button
-        className="button"
-        disabled={!!savingTemplate || loading || !!fatal}
-        aria-busy={savingTemplate === 'example'}
-        onClick={() => download('example')}
-      >
-        <Download size={16} aria-hidden="true" />
-        {savingTemplate === 'example' ? '正在保存示例…' : '下载填写示例'}
-      </button>
+    <div className="template-actions">
+      <div className="template-platform" role="group" aria-label="模板平台">
+        {PLATFORM_ORDER.map((id) => (
+          <button
+            key={id}
+            type="button"
+            className={templatePlatform === id ? 'active' : undefined}
+            aria-pressed={templatePlatform === id}
+            disabled={!platformMeta(id).enabled}
+            title={!platformMeta(id).enabled ? `${platformMeta(id).label}暂未开放` : undefined}
+            onClick={() => setTemplatePlatform(id)}
+          >
+            {platformMeta(id).label}
+            {!platformMeta(id).enabled ? '（暂未开放）' : ''}
+          </button>
+        ))}
+      </div>
+      <div className="button-group">
+        <button
+          className="button"
+          disabled={!!savingTemplate || loading || !!fatal}
+          aria-busy={savingTemplate === 'blank'}
+          onClick={() => download('blank')}
+        >
+          <Download size={16} aria-hidden="true" />
+          {savingTemplate === 'blank' ? '正在保存模板…' : '下载 Excel 模板'}
+        </button>
+        <button
+          className="button"
+          disabled={!!savingTemplate || loading || !!fatal}
+          aria-busy={savingTemplate === 'example'}
+          onClick={() => download('example')}
+        >
+          <Download size={16} aria-hidden="true" />
+          {savingTemplate === 'example' ? '正在保存示例…' : '下载填写示例'}
+        </button>
+      </div>
     </div>
   );
   const startProducts = async (shopId: string) => {
@@ -288,6 +366,7 @@ export default function App() {
           {(
             [
               { id: 'products', Icon: Boxes },
+              { id: 'collection', Icon: Download },
               { id: 'shops', Icon: Store },
               { id: 'tasks', Icon: ClipboardList },
             ] as const
@@ -315,6 +394,29 @@ export default function App() {
             <p>资料保存在这台电脑</p>
           </div>
           <div className="sidebar-tools">
+            <button
+              className={`sidebar-link update-link ${hasNewUpdate || unreadUpdateNotes ? 'update-highlight' : ''}`}
+              onClick={showUpdates}
+              title={
+                hasNewUpdate
+                  ? `发现新版本 ${updateState!.release!.version}`
+                  : unreadUpdateNotes
+                    ? '查看本次更新内容'
+                    : '查看版本与更新内容'
+              }
+            >
+              <Download size={14} aria-hidden="true" />
+              <span>软件更新</span>
+              {hasNewUpdate || unreadUpdateNotes ? (
+                <span className="update-badge">
+                  {updateState?.status === 'downloading'
+                    ? '下载中'
+                    : hasNewUpdate
+                      ? '新版本'
+                      : '更新内容'}
+                </span>
+              ) : null}
+            </button>
             <button className="sidebar-link" onClick={showBrowserSetup}>
               <Globe size={14} aria-hidden="true" />
               {checkingBrowser
@@ -355,6 +457,19 @@ export default function App() {
           </span>
         </header>
         <main>
+          <div hidden={page !== 'collection'}>
+            {!loading && !fatal ? (
+              <ShopCollection
+                shops={data.shops}
+                disabled={running}
+                onAdd={() => {
+                  setNewShopPlatform('pdd');
+                  setShopEditor('new');
+                }}
+                onBrowserSetup={showBrowserSetup}
+              />
+            ) : null}
+          </div>
           {fatal ? (
             <div className="error-message" role="alert">
               {fatal}
@@ -418,7 +533,7 @@ export default function App() {
                   </span>
                   <div>
                     <h2>让商品资料就位</h2>
-                    <p>一个 Excel，带齐商品资料和图片。</p>
+                    <p>Excel 填商品资料，图片可在 App 中批量添加。</p>
                   </div>
                 </div>
                 <div className="import-options">
@@ -459,7 +574,7 @@ export default function App() {
                         正在识别资料，请稍候…
                       </>
                     ) : (
-                      '支持单规格、多规格 .xlsx · 内嵌图片按用途和顺序自动识别'
+                      '支持单规格、多规格 .xlsx · 可自动提取内嵌图片，也可导入后批量添加'
                     )}
                   </span>
                   {downloadButtons}
@@ -543,6 +658,9 @@ export default function App() {
                       <tbody>
                         {rows.map((p) => {
                           const issues = problems(p);
+                          const enabled = platformMeta(
+                            isTaobaoProduct(p) ? 'taobao' : 'pdd',
+                          ).enabled;
                           const image = p.images[p.main[0]];
                           return (
                             <tr key={p.id}>
@@ -550,8 +668,8 @@ export default function App() {
                                 <input
                                   type="checkbox"
                                   aria-label={`选择 ${p.title || p.code}`}
-                                  checked={selected.has(p.id) && !issues.length}
-                                  disabled={!!issues.length}
+                                  checked={selected.has(p.id) && !issues.length && enabled}
+                                  disabled={!!issues.length || !enabled}
                                   onChange={(e) => toggle(p.id, e.target.checked)}
                                 />
                               </td>
@@ -577,7 +695,11 @@ export default function App() {
                                 </div>
                               </td>
                               <td>
-                                <Status complete={!issues.length} />
+                                {enabled ? (
+                                  <Status complete={!issues.length} />
+                                ) : (
+                                  <span className="status neutral">淘宝暂未开放</span>
+                                )}
                                 <span className="cell-detail">
                                   {issues.length
                                     ? `${issues.length} 项待处理`
@@ -590,6 +712,25 @@ export default function App() {
                                   onClick={() => setPending([structuredClone(p)])}
                                 >
                                   编辑资料
+                                </button>
+                                <button
+                                  className="text-button"
+                                  disabled={!!exportingId}
+                                  onClick={async () => {
+                                    setExportingId(p.id);
+                                    try {
+                                      if (await window.desktop.exportProduct(p))
+                                        setNotice(
+                                          '含图 Excel 已导出，可直接发给同事或导入其他电脑',
+                                        );
+                                    } catch (e) {
+                                      setNotice((e as Error).message);
+                                    } finally {
+                                      setExportingId('');
+                                    }
+                                  }}
+                                >
+                                  {exportingId === p.id ? '正在导出…' : '导出含图 Excel'}
                                 </button>
                               </td>
                             </tr>
@@ -659,7 +800,10 @@ export default function App() {
               shops={data.shops}
               selectedId={activeShopId}
               onSelect={setActiveShopId}
-              onAdd={() => setShopEditor('new')}
+              onAdd={(platform) => {
+                setNewShopPlatform(platform);
+                setShopEditor('new');
+              }}
               onEdit={setShopEditor}
               onLogin={setLoginShop}
               disabled={!!fatal || loading || running}
@@ -710,7 +854,22 @@ export default function App() {
               ? 'Agent 正在处理页面异常'
               : running
                 ? '已连接浏览器执行中'
-                : '保存到拼多多草稿箱'}
+                : (() => {
+                    const labels = [
+                      ...new Set(
+                        data.shops
+                          .filter(
+                            (shop) =>
+                              platformMeta(shop.platform).enabled &&
+                              platformMeta(shop.platform).draftPublishing,
+                          )
+                          .map((shop) => platformMeta(shop.platform).label),
+                      ),
+                    ];
+                    return labels.length
+                      ? `保存到${labels.join('、')}后台草稿箱`
+                      : '当前仅支持拼多多后台草稿';
+                  })()}
           </span>
         </footer>
       </div>
@@ -750,6 +909,7 @@ export default function App() {
       {shopEditor ? (
         <ShopEditor
           initial={shopEditor === 'new' ? undefined : shopEditor}
+          platform={shopEditor === 'new' ? newShopPlatform : undefined}
           encryptionAvailable={data.encryptionAvailable}
           onClose={() => setShopEditor(null)}
           onSaved={async (shopId) => {
@@ -817,6 +977,13 @@ export default function App() {
             <p>选择文件夹功能待开发，请先使用“上传 Excel”导入商品资料。</p>
           </div>
         </Modal>
+      ) : null}
+      {updatesOpen ? (
+        <AppUpdates
+          state={updateState}
+          onState={setUpdateState}
+          onClose={() => setUpdatesOpen(false)}
+        />
       ) : null}
       {help ? <TemplateDownload onClose={() => setHelp(false)} actions={downloadButtons} /> : null}
     </div>
