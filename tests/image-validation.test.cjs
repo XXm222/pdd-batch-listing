@@ -9,6 +9,7 @@ const {
   imageProblems,
   imageUploadSizeLimit,
   problems,
+  missingSkuImages,
 } = require('../dist-electron/src/domain');
 const {
   saveImage,
@@ -28,6 +29,23 @@ const base = {
   bytes: 3 * 1024 * 1024,
   format: 'png',
 };
+test('SKU image prompts clear when a real image is bound and do not turn every category into a mandatory-image rule', () => {
+  const p = newProduct();
+  p.templateFormat = '运营模板 v3';
+  p.skus[0].options = [{ name: '颜色', value: '紫色' }];
+  const initialProblems = problems(p);
+  assert.deepEqual(missingSkuImages(p), [0]);
+  assert.deepEqual(problems(p), initialProblems);
+  const supplied = applyImages(p, [base], { kind: 'sku', index: 0 });
+  assert.deepEqual(missingSkuImages(supplied), []);
+  delete supplied.images[supplied.skus[0].image];
+  assert.deepEqual(missingSkuImages(supplied), [0]);
+  p.skus[0].options = [];
+  assert.deepEqual(missingSkuImages(p), []);
+  p.templateFormat = '淘宝运营模板 v4';
+  p.skus[0].options = [{ name: '颜色', value: '紫色' }];
+  assert.deepEqual(missingSkuImages(p), []);
+});
 test('full upload area remains readable after its file input disappears; input selection is scoped and unambiguous', () => {
   const run = (local, generic, global, rootCount = 1) => {
     const root = {

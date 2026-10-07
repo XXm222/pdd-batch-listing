@@ -24,6 +24,7 @@ import {
   resolveShopName,
   shopNameFromAccount,
   isStructuredProduct,
+  missingSkuImages,
 } from './domain';
 import { PictureEditor, SkuEditor } from './ProductEditors';
 import {
@@ -100,11 +101,19 @@ export function Modal({
     </dialog>
   );
 }
-export function Status({ complete, count }: { complete: boolean; count?: number }) {
+export function Status({
+  complete,
+  count,
+  note,
+}: {
+  complete: boolean;
+  count?: number;
+  note?: string;
+}) {
   return (
     <span className={`status ${complete ? 'ready' : 'warning'}`}>
       {complete ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}{' '}
-      {complete ? '本机检查通过' : count ? `${count} 项待补充` : '待补充'}
+      {note || (complete ? '本机检查通过' : count ? `${count} 项待补充` : '待补充')}
     </span>
   );
 }
@@ -150,6 +159,10 @@ export function Recognition({
     return conflict && choice?.existingId === conflict.existing.id ? choice.action : undefined;
   };
   const kept = products.filter((product) => choiceFor(product) !== 'skip');
+  const missingImageCount = kept.reduce(
+    (count, product) => count + missingSkuImages(product).length,
+    0,
+  );
   const reports = products
     .map((product, index) => ({ product, index, issues: problems(product) }))
     .filter((report) => choiceFor(report.product) !== 'skip' && report.issues.length);
@@ -264,7 +277,7 @@ export function Recognition({
     <>
       <Modal
         title="确认商品资料"
-        subtitle={`${products.length} 件商品 · ${products.reduce((n, p) => n + p.skus.length, 0)} 个组合${incomplete ? ` · ${incomplete} 件待补充` : ' · 本机检查通过'}`}
+        subtitle={`${products.length} 件商品 · ${products.reduce((n, p) => n + p.skus.length, 0)} 个组合${incomplete ? ` · ${incomplete} 件待补充` : missingImageCount ? ` · ${missingImageCount} 个组合未添加规格图` : ' · 本机检查通过'}`}
         wide
         onClose={requestClose}
         busy={busy}
@@ -298,6 +311,11 @@ export function Recognition({
                   >
                     查看问题
                   </button>
+                </span>
+              ) : missingImageCount ? (
+                <span className="pending-summary" role="status">
+                  <AlertCircle size={15} />
+                  {missingImageCount} 个组合未添加规格图，请在资料中核对；是否必填按后台类目要求。
                 </span>
               ) : (
                 '保存到本机资料库，再选择执行店铺。'
@@ -338,7 +356,14 @@ export function Recognition({
               >
                 <strong>{item.title || '商品标题待填写'}</strong>
                 <span>{item.code || '商品编码待填写'}</span>
-                <Status complete={!problems(item).length} />
+                <Status
+                  complete={!problems(item).length && !missingSkuImages(item).length}
+                  note={
+                    !problems(item).length && missingSkuImages(item).length
+                      ? '规格图待确认'
+                      : undefined
+                  }
+                />
               </button>
             ))}
           </aside>
@@ -660,7 +685,7 @@ export function Recognition({
                   ))}
               </div>
             </details>
-            {!issues.length ? (
+            {!issues.length && !missingSkuImages(p).length ? (
               <div className="complete-note">
                 <CheckCircle2 size={16} />
                 本机检查通过，保存后可选择店铺；后台规则仍需核验。

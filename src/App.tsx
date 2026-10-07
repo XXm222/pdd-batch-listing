@@ -37,7 +37,7 @@ import { batchProgress, taskIsHistory } from './task-progress';
 import { AgentSettings } from './AgentSettings';
 import { ShopLogin } from './ShopLogin';
 import { BrowserSetup } from './BrowserSetup';
-import { isTaobaoProduct, lowestPrice, problems } from './domain';
+import { isTaobaoProduct, lowestPrice, missingSkuImages, problems } from './domain';
 import { DEFAULT_PLATFORM, PLATFORM_ORDER, platformMeta, type PlatformId } from './platforms';
 import { productList } from './product-list';
 import { mergeWorkspace, applyTaskUpdate } from './workspace-state';
@@ -658,6 +658,7 @@ export default function App() {
                       <tbody>
                         {rows.map((p) => {
                           const issues = problems(p);
+                          const missingImages = missingSkuImages(p).length;
                           const enabled = platformMeta(
                             isTaobaoProduct(p) ? 'taobao' : 'pdd',
                           ).enabled;
@@ -696,7 +697,12 @@ export default function App() {
                               </td>
                               <td>
                                 {enabled ? (
-                                  <Status complete={!issues.length} />
+                                  <Status
+                                    complete={!issues.length && !missingImages}
+                                    note={
+                                      !issues.length && missingImages ? '规格图待确认' : undefined
+                                    }
+                                  />
                                 ) : (
                                   <span className="status neutral">淘宝暂未开放</span>
                                 )}

@@ -1,7 +1,7 @@
 import { Fragment, useId } from 'react';
 import { ArrowLeft, ArrowRight, ImagePlus, Trash2 } from 'lucide-react';
 import type { Asset, ImageTarget, Product, Sku } from './types';
-import { imageSizeText, isTaobaoProduct } from './domain';
+import { imageSizeText, isTaobaoProduct, missingSkuImages } from './domain';
 
 export function SkuEditor({
   product,
@@ -17,6 +17,7 @@ export function SkuEditor({
   onPreview: (asset: Asset) => void;
 }) {
   const helpId = useId();
+  const missingImages = missingSkuImages(product);
   const priceFields: { key: 'group' | 'single' | 'stock'; label: string; hint: string }[] = [
     ...(isTaobaoProduct(product)
       ? [
@@ -72,6 +73,13 @@ export function SkuEditor({
           只有颜色可选时，第二组两格都留空；没有可选款式时，两组都留空。所有组合的区分方式和顺序要一致，例如第一组都填颜色、第二组都填容量。
         </p>
       </div>
+      {missingImages.length ? (
+        <p className="sku-image-warning" role="status">
+          {missingImages.length}{' '}
+          个组合未添加规格图。部分后台类目要求必填，请逐个核对下方组合并直接添加图片，无需修改
+          Excel。
+        </p>
+      ) : null}
       <div className="table-scroll">
         <table className="sku-table compact-skus">
           <thead>
@@ -169,11 +177,11 @@ export function SkuEditor({
                 </tr>
                 <tr className="sku-optional-row">
                   <td colSpan={priceFields.length + 2}>
-                    <details>
-                      <summary>组合 {n + 1} 的编码与图片（选填）</summary>
+                    <details open>
+                      <summary>组合 {n + 1} 的编码与规格图</summary>
                       <div className="sku-optional-fields">
                         <label>
-                          规格编码
+                          规格编码（选填）
                           <input
                             disabled={disabled}
                             aria-label={`组合 ${n + 1} 规格编码`}
@@ -188,7 +196,7 @@ export function SkuEditor({
                         <div className="sku-image-field">
                           <span>规格图</span>
                           <span className="sku-field-hint">
-                            展示这个组合颜色或款式的图片，可不添加。
+                            展示这个组合的颜色或款式；后台标为必填时须补齐。
                           </span>
                           {sku.image && product.images[sku.image] ? (
                             <button
@@ -202,7 +210,13 @@ export function SkuEditor({
                               />
                             </button>
                           ) : (
-                            <span className="quiet-note">未添加</span>
+                            <span
+                              className={
+                                missingImages.includes(n) ? 'status warning' : 'quiet-note'
+                              }
+                            >
+                              {missingImages.includes(n) ? '未添加规格图 · 请核对' : '未添加'}
+                            </span>
                           )}
                           <button
                             className="text-button"

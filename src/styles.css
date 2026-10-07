@@ -2471,6 +2471,16 @@ fieldset.editor {
 .sku-field-hint {
   margin: 6px 0 0;
 }
+.sku-image-warning {
+  padding: 12px 14px;
+  margin: 0 0 14px;
+  border: 1px solid #e8c58d;
+  border-radius: 6px;
+  background: #fff8eb;
+  color: #805000;
+  font-size: 12px;
+  line-height: 1.65;
+}
 .sku-combination-note {
   margin: 8px 0 4px;
 }

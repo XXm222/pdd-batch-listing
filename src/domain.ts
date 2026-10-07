@@ -69,6 +69,17 @@ export function imageUploadSizeLimit(
 export const requiresFreightTemplate = (platform: PlatformId) => platform !== 'taobao';
 export const isStructuredProduct = (p: Product) =>
   ['运营模板 v2', '运营模板 v3', TAOBAO_TEMPLATE_FORMAT].includes(p.templateFormat);
+// Missing previews are a prompt, not a universal platform requirement. The
+// selected shop's current category decides whether execution needs an image.
+export const missingSkuImages = (p: Product): number[] =>
+  isTaobaoProduct(p)
+    ? []
+    : p.skus.flatMap((sku, index) =>
+        sku.options?.some((option) => option.name.trim() || option.value.trim()) &&
+        (!sku.image || !Object.hasOwn(p.images, sku.image))
+          ? [index]
+          : [],
+      );
 export const safeImageName = (name: unknown): name is string =>
   typeof name === 'string' &&
   name.length > 0 &&
