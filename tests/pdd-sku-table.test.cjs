@@ -117,10 +117,11 @@ function page(options = {}) {
     { name: '颜色', values: ['紫色', '灰色'] },
     { name: '容量', values: ['10L', '20L', '30L'] },
   ];
-  adapter.productCodeControl = async () => ({
+  const productCode = {
     selector: 'input[data-goods-product-code="true"]',
     value: '',
-  });
+  };
+  adapter.productCodeControl = async () => productCode;
   adapter.task = { id: 'task-1', goodsId: 'goods-1' };
   adapter.context = {
     patch(values) {
@@ -146,7 +147,10 @@ function page(options = {}) {
       return result;
     },
     async fill(selector, value) {
-      if (selector === 'input[data-goods-product-code="true"]') return;
+      if (selector === productCode.selector) {
+        productCode.value = value;
+        return;
+      }
       const cell = physicalCell(selector);
       assert.ok(cell.input, 'write must target an actual input, not a merged spec/image cell');
       cell.input.value = value;
@@ -174,6 +178,7 @@ test('actual table reader expands merged headers and two-dimensional six-SKU row
     '预览图',
     '规格编码',
   ]);
+  assert.deepEqual(table.requiredHeaders, ['库存']);
   assert.deepEqual(
     table.rows.map((row) => row.cells.slice(0, 2).map((cell) => cell.text)),
     product().skus.map((sku) => sku.options.map((option) => option.value)),
@@ -210,6 +215,58 @@ test('six merged-row SKUs receive their own price/stock/code and shared preview 
     2,
     'verified uploaded previews must be reused without accessing disappeared file inputs',
   );
+});
+
+test('omitted SKU previews leave existing images intact and still fill and verify all prices and stocks', async () => {
+  const f = page(),
+    p = product();
+  for (const sku of p.skus) sku.image = '';
+  f.rows[0].cells[5].remoteUrl = 'https://img.example/existing.jpg';
+  await f.adapter.skus(p);
+  await f.adapter.verifySkus(p, 'form');
+  assert.equal(f.writes.length, 24);
+  assert.equal(f.uploads.length, 0);
+  assert.equal(f.rows[0].cells[5].remoteUrl, 'https://img.example/existing.jpg');
+  assert.equal(f.adapter.task.skuImageManifest, undefined);
+});
+
+test('one supplied preview covers its whole merged cell while omitted image cells stay empty', async () => {
+  const f = page(),
+    p = product();
+  for (const sku of p.skus) sku.image = '';
+  p.skus[1].image = 'purple';
+  await f.adapter.skus(p);
+  await f.adapter.verifySkus(p, 'form');
+  assert.equal(f.writes.length, 24);
+  assert.deepEqual(
+    f.uploads.map((upload) => upload.name),
+    ['purple'],
+  );
+  assert.equal(f.rows[3].cells[5].remoteUrl, undefined);
+  const slots = Object.keys(f.adapter.task.skuImageManifest.slots);
+  assert.equal(slots.length, 1);
+  assert.equal(JSON.parse(slots[0]).length, 3);
+});
+
+test('a backend-required preview without a supplied or existing image asks to edit the product before writing prices', async () => {
+  const f = page(),
+    p = product();
+  f.table.tHead.rows[0].cells[4].innerText = '*预览图';
+  for (const sku of p.skus) sku.image = '';
+  await assert.rejects(f.adapter.skus(p), (error) => {
+    assert.equal(error.code, 'invalid_product');
+    assert.equal(error.recovery, 'edit_product');
+    assert.equal(error.details.source, 'required_sku_image');
+    assert.match(error.message, /当前类目要求规格预览图.*颜色:紫色/);
+    return true;
+  });
+  assert.equal(f.writes.length, 0);
+  assert.equal(f.uploads.length, 0);
+  for (const row of [f.rows[0], f.rows[3]])
+    row.cells[5].remoteUrl = 'https://img.example/existing.jpg';
+  await f.adapter.skus(p);
+  await f.adapter.verifySkus(p, 'form');
+  assert.equal(f.uploads.length, 0);
 });
 
 test('SKU previews are uploaded as named copies, never as the extensionless asset store path', async () => {

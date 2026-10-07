@@ -43,6 +43,8 @@ test('untrusted SKU replies cannot disguise missing cells, zero spans or malform
     (t) => (t.rows[0].cells[1].rowSpan = 0),
     (t) => (t.rows[0].cells[1].control.disabled = 'false'),
     (t) => (t.rows[0].cells[1] = null),
+    (t) => (t.requiredHeaders = ['unknown column']),
+    (t) => (t.requiredHeaders = [true]),
   ]) {
     const t = table();
     mutate(t);

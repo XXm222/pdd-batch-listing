@@ -1064,17 +1064,31 @@ export class PddAdapter {
       for (let i = 0; i < p.skus.length; i++) {
         const sku = p.skus[i],
           cell = matchedRows[i].cells[imageColumn];
-        if (!sku.image) throw new Error(`规格 ${sku.spec} 需要后台预览图，请在资料中补充规格图片`);
         if (!cell?.selector) throw new Error('规格图片单元格未定位');
         const existing = imageTargets.get(cell.selector);
-        if (existing && existing.image !== sku.image)
+        if (existing?.image && sku.image && existing.image !== sku.image)
           throw new Error('后台合并的规格图片单元格对应不同图片，未覆盖图片');
         const combination = JSON.stringify(
           (sku.options || []).map((option) => [option.name, option.value]),
         );
-        if (existing) existing.combinations.push(combination);
-        else imageTargets.set(cell.selector, { image: sku.image, combinations: [combination] });
+        if (existing) {
+          existing.image ||= sku.image || '';
+          existing.combinations.push(combination);
+        } else
+          imageTargets.set(cell.selector, { image: sku.image || '', combinations: [combination] });
       }
+    if (imageColumn >= 0 && table.requiredHeaders?.includes(table.headers[imageColumn]))
+      for (const [selector, target] of imageTargets)
+        if (!target.image && !(await this.skuImageState(selector)).remoteUrl) {
+          const combinations = target.combinations.map((key) => JSON.parse(key));
+          throw new ExecutionError(
+            'invalid_product',
+            `当前类目要求规格预览图：${combinations[0].map(([name, value]: string[]) => `${name}:${value}`).join(' / ')} 未提供图片，请在商品资料中补充规格图后重试`,
+            'edit_product',
+            true,
+            { source: 'required_sku_image', combinations },
+          );
+        }
     for (let i = 0; i < p.skus.length; i++) {
       const sku = p.skus[i],
         row = matchedRows[i];
@@ -1097,7 +1111,9 @@ export class PddAdapter {
         await this.bridge.fill(selector, value);
       }
     }
-    for (const target of imageTargets.values()) await this.skuImage(p, target);
+    // A preview column is not a required-image rule. Keep omitted cells intact;
+    // a supplied image belongs to every combination sharing that physical cell.
+    for (const target of imageTargets.values()) if (target.image) await this.skuImage(p, target);
     if (names.length) {
       const control = await this.productCodeControl();
       await this.bridge.fill(control.selector, p.code);

@@ -14,7 +14,11 @@ export type SkuTableCell = {
     readOnly: boolean;
   };
 };
-export type SkuTable = { headers: string[]; rows: { index: number; cells: SkuTableCell[] }[] };
+export type SkuTable = {
+  headers: string[];
+  requiredHeaders?: string[];
+  rows: { index: number; cells: SkuTableCell[] }[];
+};
 export type RemoteImages = { main: string[]; detail: string[] };
 export type SavedSettings = { reference?: string; shipping?: string; freight?: string };
 
@@ -120,6 +124,9 @@ export function readSkuTable(): SkuTable {
   };
   const head = expand([...(table.tHead?.rows || [])], -1);
   const headers = (head.at(-1) || []).map((cell) => cell.text.replace(/\*/g, '').trim());
+  const requiredHeaders = (head.at(-1) || [])
+    .filter((cell) => /^\s*\*/.test(cell.text))
+    .map((cell) => cell.text.replace(/\*/g, '').trim());
   if (!headers.length) throw Error('价格库存表未读取到表头');
   const rows = [...table.tBodies]
     .flatMap((body, index) => expand([...body.rows], index))
@@ -131,7 +138,7 @@ export function readSkuTable(): SkuTable {
         throw Error('价格库存表列数不完整');
       return { index, cells };
     });
-  return { headers, rows };
+  return { headers, requiredHeaders, rows };
 }
 
 export function readRemoteImages(): RemoteImages {
@@ -226,6 +233,13 @@ export function parseSkuTable(value: unknown): SkuTable {
     !Array.isArray(value.rows)
   )
     return invalid('价格库存表');
+  const headers = value.headers;
+  if (
+    value.requiredHeaders !== undefined &&
+    (!strings(value.requiredHeaders) ||
+      value.requiredHeaders.some((header) => !headers.includes(header)))
+  )
+    return invalid('价格库存表必填列');
   const width = value.headers.length;
   for (const [index, row] of value.rows.entries()) {
     if (
