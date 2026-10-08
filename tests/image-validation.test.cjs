@@ -10,6 +10,7 @@ const {
   imageUploadSizeLimit,
   problems,
   missingSkuImages,
+  withSkuOptions,
 } = require('../dist-electron/src/domain');
 const {
   saveImage,
@@ -29,6 +30,44 @@ const base = {
   bytes: 3 * 1024 * 1024,
   format: 'png',
 };
+test('editing shared SKU dimensions preserves option order, prices, real zero stock and image bindings', () => {
+  const sku = {
+    spec: '颜色:紫色 / 容量:10L',
+    options: [
+      { name: '颜色', value: '紫色' },
+      { name: '容量', value: '10L' },
+    ],
+    group: '19.99',
+    single: '20.99',
+    stock: '0',
+    code: 'SKU-1',
+    image: 'purple.jpg',
+  };
+  const renamed = withSkuOptions(sku, [
+    { name: '款式', value: '紫色' },
+    { name: '', value: '10L' },
+  ]);
+  assert.deepEqual(renamed.options, [
+    { name: '款式', value: '紫色' },
+    { name: '', value: '10L' },
+  ]);
+  assert.equal(renamed.spec, '款式:紫色 / :10L');
+  for (const key of ['group', 'single', 'stock', 'code', 'image'])
+    assert.equal(renamed[key], sku[key]);
+  assert.equal(sku.options[0].name, '颜色');
+  const single = withSkuOptions(sku, [
+    { name: '颜色', value: '紫色' },
+    { name: '', value: '' },
+  ]);
+  assert.equal(single.options.length, 1);
+  assert.equal(
+    withSkuOptions(sku, [
+      { name: '', value: '' },
+      { name: '', value: '' },
+    ]).spec,
+    '默认规格',
+  );
+});
 test('SKU image prompts clear when a real image is bound and do not turn every category into a mandatory-image rule', () => {
   const p = newProduct();
   p.templateFormat = '运营模板 v3';

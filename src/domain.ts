@@ -1,4 +1,4 @@
-import type { Asset, ImageTarget, Product } from './types';
+import type { Asset, ImageTarget, Product, Sku } from './types';
 import { DEFAULT_PLATFORM, platformMeta, type PlatformId } from './platforms';
 export const uid = () => crypto.randomUUID();
 /** 淘宝模板的 templateFormat 标记；导入器与校验都按它分支。 */
@@ -80,6 +80,17 @@ export const missingSkuImages = (p: Product): number[] =>
           ? [index]
           : [],
       );
+export function withSkuOptions(sku: Sku, options: { name: string; value: string }[]): Sku {
+  const next = options.map((option) => ({ ...option }));
+  while (next.length && !next.at(-1)!.name.trim() && !next.at(-1)!.value.trim()) next.pop();
+  return {
+    ...sku,
+    options: next,
+    spec: next.length
+      ? next.map((option) => `${option.name}:${option.value}`).join(' / ')
+      : '默认规格',
+  };
+}
 export const safeImageName = (name: unknown): name is string =>
   typeof name === 'string' &&
   name.length > 0 &&

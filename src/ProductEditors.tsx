@@ -1,7 +1,7 @@
-import { Fragment, useId } from 'react';
+import { useId, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, ImagePlus, Trash2 } from 'lucide-react';
 import type { Asset, ImageTarget, Product, Sku } from './types';
-import { imageSizeText, isTaobaoProduct, missingSkuImages } from './domain';
+import { imageSizeText, isTaobaoProduct, missingSkuImages, withSkuOptions } from './domain';
 
 export function SkuEditor({
   product,
@@ -9,238 +9,207 @@ export function SkuEditor({
   onChange,
   onImage,
   onPreview,
+  pricingFields,
 }: {
   product: Product;
   disabled: boolean;
   onChange: (skus: Sku[]) => void;
   onImage: (target: ImageTarget) => void;
   onPreview: (asset: Asset) => void;
+  pricingFields?: ReactNode;
 }) {
   const helpId = useId();
   const missingImages = missingSkuImages(product);
-  const priceFields: { key: 'group' | 'single' | 'stock'; label: string; hint: string }[] = [
-    ...(isTaobaoProduct(product)
-      ? [
-          {
-            key: 'single' as const,
-            label: '一口价（元）',
-            hint: '这个组合每件的售价，最多两位小数。',
-          },
-        ]
-      : [
-          {
-            key: 'group' as const,
-            label: '拼单价（元）',
-            hint: '参与拼单时的每件价格，不能高于单买价。',
-          },
-          {
-            key: 'single' as const,
-            label: '单买价（元）',
-            hint: '不参与拼单，单独购买时的每件价格。',
-          },
-        ]),
-    { key: 'stock', label: '库存（件）', hint: '这个组合可售的件数，填整数；0 表示暂无可售库存。' },
-  ];
-  const change = (n: number, patch: Partial<Sku>) =>
-    onChange(product.skus.map((sku, i) => (i === n ? { ...sku, ...patch } : sku)));
-  const option = (n: number, position: number, key: 'name' | 'value', value: string) => {
-    const sku = product.skus[n];
-    const options = [0, 1].map((i) => ({
+  const taobao = isTaobaoProduct(product);
+  const names = [0, 1].map((i) => product.skus[0]?.options?.[i]?.name || '');
+  const optionsFor = (sku: Sku) =>
+    Array.from({ length: Math.max(2, sku.options?.length || 0) }, (_, i) => ({
       name: sku.options?.[i]?.name || '',
       value: sku.options?.[i]?.value || '',
     }));
-    options[position] = { ...options[position], [key]: value };
-    while (
-      options.length &&
-      !options[options.length - 1].name.trim() &&
-      !options[options.length - 1].value.trim()
-    )
-      options.pop();
-    change(n, {
-      options,
-      spec: options.length ? options.map((o) => `${o.name}:${o.value}`).join(' / ') : '默认规格',
-    });
-  };
+  const rename = (position: number, name: string) =>
+    onChange(
+      product.skus.map((sku) =>
+        withSkuOptions(
+          sku,
+          optionsFor(sku).map((option, i) => (i === position ? { ...option, name } : option)),
+        ),
+      ),
+    );
+  const option = (index: number, position: number, value: string) =>
+    onChange(
+      product.skus.map((sku, i) =>
+        i === index
+          ? withSkuOptions(
+              sku,
+              optionsFor(sku).map((option, n) => (n === position ? { ...option, value } : option)),
+            )
+          : sku,
+      ),
+    );
+  const change = (index: number, patch: Partial<Sku>) =>
+    onChange(product.skus.map((sku, i) => (i === index ? { ...sku, ...patch } : sku)));
+  const dimensionsDiffer = product.skus.some((sku) =>
+    [0, 1].some((i) => (sku.options?.[i]?.name || '') !== names[i]),
+  );
+  const prices: { key: 'group' | 'single' | 'stock'; label: string }[] = [
+    ...(taobao
+      ? [{ key: 'single' as const, label: '一口价（元）' }]
+      : [
+          { key: 'group' as const, label: '拼单价（元）' },
+          { key: 'single' as const, label: '单买价（元）' },
+        ]),
+    { key: 'stock', label: '库存（件）' },
+  ];
   return (
     <>
-      <div className="sku-guidance" id={helpId}>
-        <p>
-          <strong>一个组合就是一种可购买的款式。</strong>
-          例如“颜色：紫色”＋“容量：10L”，共同组成“紫色＋10L”这一款。
-          两组规格共用一套价格和库存；其他颜色或容量另点“添加规格组合”填写。
-        </p>
-        <p>
-          只有颜色可选时，第二组两格都留空；没有可选款式时，两组都留空。所有组合的区分方式和顺序要一致，例如第一组都填颜色、第二组都填容量。
-        </p>
+      <div className="sku-dimensions">
+        {[0, 1].map((position) => (
+          <label key={position}>
+            规格{position ? '二' : '一'}名称{position ? '（选填）' : ''}
+            <input
+              aria-label={`规格${position ? '二' : '一'}名称`}
+              disabled={disabled}
+              maxLength={50}
+              value={names[position]}
+              placeholder={position ? '如容量、套餐；不用时留空' : '如颜色、款式；单规格可留空'}
+              onChange={(e) => rename(position, e.target.value)}
+            />
+          </label>
+        ))}
+        {pricingFields}
+        <details className="sku-help">
+          <summary>填写说明</summary>
+          <div id={helpId}>
+            <p>
+              每行是一种可购买组合，如“紫色＋10L”，分别填写价格与库存。规格名称对所有组合统一生效。
+            </p>
+            <p>
+              只有一种区分方式时，规格二名称和选项都留空；无可选款式时，两组均留空。库存可填
+              0，拼单价不能高于单买价。
+            </p>
+            <p>规格图按目标店铺类目要求核对，可在表格内直接添加。规格编码可留空。</p>
+          </div>
+        </details>
       </div>
-      {missingImages.length ? (
+      {dimensionsDiffer ? (
         <p className="sku-image-warning" role="status">
-          {missingImages.length}{' '}
-          个组合未添加规格图。部分后台类目要求必填，请逐个核对下方组合并直接添加图片，无需修改
-          Excel。
+          各组合的规格名称不一致，请先核对；修改上方名称会统一所有组合的名称，并保留每行选项。
         </p>
       ) : null}
-      <div className="table-scroll">
-        <table className="sku-table compact-skus">
+      {missingImages.length ? (
+        <p className="sku-image-warning" role="status">
+          {missingImages.length} 个组合未添加规格图，请在对应行添加；是否必填按后台类目要求。
+        </p>
+      ) : null}
+      <div className="table-scroll sku-grid-scroll">
+        <table className="sku-grid">
           <thead>
             <tr>
-              <th>规格组合</th>
-              {priceFields.map(({ key, label }) => (
-                <th key={key}>{label}</th>
+              <th className="sku-number-col">组合</th>
+              <th className="sku-image-col">规格图</th>
+              <th>{names[0] || '规格一选项'}</th>
+              <th>{names[1] || '规格二选项'}</th>
+              {prices.map((price) => (
+                <th key={price.key}>{price.label}</th>
               ))}
-              <th>
+              <th>规格编码</th>
+              <th className="sku-actions-col">
                 <span className="sr-only">操作</span>
               </th>
             </tr>
           </thead>
           <tbody>
-            {product.skus.map((sku, n) => (
-              <Fragment key={n}>
-                <tr className="sku-heading-row">
-                  <td>
-                    <span className="sku-row-label">组合 {n + 1}</span>
-                    <span className="spec-group-title">第一组规格</span>
-                  </td>
-                  <td className="sku-price-heading" colSpan={priceFields.length}>
-                    本组合价格和库存（两组规格共用）
-                  </td>
-                  <td />
-                </tr>
-                <tr>
-                  <td>
-                    {[0, 1].map((position) => (
-                      <div className="spec-group" key={position}>
-                        {position ? (
-                          <span className="spec-group-title">第二组规格（选填）</span>
-                        ) : null}
-                        <div className="spec-pair">
-                          <label>
-                            按什么区分
-                            <input
-                              disabled={disabled}
-                              aria-label={`组合 ${n + 1} 第${position ? '二' : '一'}组 按什么区分`}
-                              aria-describedby={helpId}
-                              maxLength={50}
-                              placeholder={position ? '如：容量、尺寸' : '如：颜色'}
-                              value={sku.options?.[position]?.name || ''}
-                              onChange={(e) => option(n, position, 'name', e.target.value)}
-                            />
-                          </label>
-                          <label>
-                            具体选项
-                            <input
-                              disabled={disabled}
-                              aria-label={`组合 ${n + 1} 第${position ? '二' : '一'}组 具体选项`}
-                              aria-describedby={helpId}
-                              maxLength={100}
-                              placeholder={position ? '如：10L、大号' : '如：紫色'}
-                              value={sku.options?.[position]?.value || ''}
-                              onChange={(e) => option(n, position, 'value', e.target.value)}
-                            />
-                          </label>
-                        </div>
-                      </div>
-                    ))}
-                    <p className="sku-combination-note">
-                      以上两组共同确定组合 {n + 1}，右侧价格和库存只填一次。
-                    </p>
-                  </td>
-                  {priceFields.map(({ key, label, hint }) => (
-                    <td key={key} className="sku-price-cell">
-                      <label className="sku-price-field">
-                        {label}
-                        <input
+            {product.skus.map((sku, index) => (
+              <tr key={index}>
+                <td className="sku-row-number">{index + 1}</td>
+                <td className="sku-image-cell">
+                  {sku.image && product.images[sku.image] ? (
+                    <div className="sku-image-controls">
+                      <button
+                        className="sku-preview"
+                        disabled={disabled}
+                        aria-label={`预览组合 ${index + 1} 规格图`}
+                        onClick={() => onPreview(product.images[sku.image!])}
+                      >
+                        <img src={product.images[sku.image].url} alt={`组合 ${index + 1} 规格图`} />
+                      </button>
+                      <div>
+                        <button
+                          className="text-button"
                           disabled={disabled}
-                          aria-label={`组合 ${n + 1} ${label}`}
-                          aria-describedby={`${helpId}-${n}-${key}`}
-                          value={sku[key]}
-                          maxLength={20}
-                          inputMode={key === 'stock' ? 'numeric' : 'decimal'}
-                          onChange={(e) => change(n, { [key]: e.target.value })}
-                        />
-                      </label>
-                      <p className="sku-field-hint" id={`${helpId}-${n}-${key}`}>
-                        {hint}
-                      </p>
-                    </td>
-                  ))}
-                  <td>
-                    <button
-                      className="icon-button small"
-                      disabled={disabled || product.skus.length === 1}
-                      aria-label={`删除组合 ${n + 1}`}
-                      onClick={() => onChange(product.skus.filter((_, i) => i !== n))}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </td>
-                </tr>
-                <tr className="sku-optional-row">
-                  <td colSpan={priceFields.length + 2}>
-                    <details open>
-                      <summary>组合 {n + 1} 的编码与规格图</summary>
-                      <div className="sku-optional-fields">
-                        <label>
-                          规格编码（选填）
-                          <input
-                            disabled={disabled}
-                            aria-label={`组合 ${n + 1} 规格编码`}
-                            value={sku.code || ''}
-                            maxLength={250}
-                            onChange={(e) => change(n, { code: e.target.value })}
-                          />
-                          <span className="sku-field-hint">
-                            这个组合的内部货号，用于识别不同款式，可留空。
-                          </span>
-                        </label>
-                        <div className="sku-image-field">
-                          <span>规格图</span>
-                          <span className="sku-field-hint">
-                            展示这个组合的颜色或款式；后台标为必填时须补齐。
-                          </span>
-                          {sku.image && product.images[sku.image] ? (
-                            <button
-                              className="sku-preview"
-                              aria-label={`预览组合 ${n + 1} 规格图`}
-                              onClick={() => onPreview(product.images[sku.image!])}
-                            >
-                              <img
-                                src={product.images[sku.image].url}
-                                alt={`组合 ${n + 1} 规格图`}
-                              />
-                            </button>
-                          ) : (
-                            <span
-                              className={
-                                missingImages.includes(n) ? 'status warning' : 'quiet-note'
-                              }
-                            >
-                              {missingImages.includes(n) ? '未添加规格图 · 请核对' : '未添加'}
-                            </span>
-                          )}
-                          <button
-                            className="text-button"
-                            disabled={disabled}
-                            onClick={() => onImage({ kind: 'sku', index: n })}
-                          >
-                            <ImagePlus size={15} />
-                            {sku.image ? '替换规格图' : '添加规格图'}
-                          </button>
-                          {sku.image ? (
-                            <button
-                              className="text-button"
-                              disabled={disabled}
-                              onClick={() => change(n, { image: '' })}
-                            >
-                              移除
-                            </button>
-                          ) : null}
-                        </div>
+                          aria-label={`替换组合 ${index + 1} 规格图`}
+                          onClick={() => onImage({ kind: 'sku', index })}
+                        >
+                          替换
+                        </button>
+                        <button
+                          className="text-button"
+                          disabled={disabled}
+                          aria-label={`移除组合 ${index + 1} 规格图`}
+                          onClick={() => change(index, { image: '' })}
+                        >
+                          移除
+                        </button>
                       </div>
-                    </details>
+                    </div>
+                  ) : (
+                    <button
+                      className={`sku-add-image ${missingImages.includes(index) ? 'is-missing' : ''}`}
+                      disabled={disabled}
+                      aria-label={`添加组合 ${index + 1} 规格图`}
+                      onClick={() => onImage({ kind: 'sku', index })}
+                    >
+                      <ImagePlus size={17} />
+                      <span>添加图片</span>
+                    </button>
+                  )}
+                </td>
+                {[0, 1].map((position) => (
+                  <td key={position}>
+                    <input
+                      disabled={disabled}
+                      aria-label={`组合 ${index + 1} 第${position ? '二' : '一'}组 具体选项`}
+                      maxLength={100}
+                      value={sku.options?.[position]?.value || ''}
+                      placeholder={position ? '可留空' : '如紫色'}
+                      onChange={(e) => option(index, position, e.target.value)}
+                    />
                   </td>
-                </tr>
-              </Fragment>
+                ))}
+                {prices.map(({ key, label }) => (
+                  <td key={key}>
+                    <input
+                      disabled={disabled}
+                      aria-label={`组合 ${index + 1} ${label}`}
+                      value={sku[key]}
+                      maxLength={20}
+                      inputMode={key === 'stock' ? 'numeric' : 'decimal'}
+                      onChange={(e) => change(index, { [key]: e.target.value })}
+                    />
+                  </td>
+                ))}
+                <td>
+                  <input
+                    disabled={disabled}
+                    aria-label={`组合 ${index + 1} 规格编码`}
+                    value={sku.code || ''}
+                    maxLength={250}
+                    placeholder="选填"
+                    onChange={(e) => change(index, { code: e.target.value })}
+                  />
+                </td>
+                <td>
+                  <button
+                    className="icon-button small"
+                    disabled={disabled || product.skus.length === 1}
+                    aria-label={`删除组合 ${index + 1}`}
+                    onClick={() => onChange(product.skus.filter((_, i) => i !== index))}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </td>
+              </tr>
             ))}
           </tbody>
         </table>

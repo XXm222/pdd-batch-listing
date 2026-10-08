@@ -117,6 +117,13 @@ export function Status({
     </span>
   );
 }
+type EditorSection = 'basic' | 'skus' | 'images' | 'settings';
+const editorSections: { id: EditorSection; label: string }[] = [
+  { id: 'basic', label: '基本资料' },
+  { id: 'skus', label: '规格与价格' },
+  { id: 'images', label: '商品图片' },
+  { id: 'settings', label: '发货与服务' },
+];
 export function Recognition({
   initial,
   existing,
@@ -129,6 +136,13 @@ export function Recognition({
   onSaved: () => Promise<void>;
 }) {
   const [products, setProducts] = useState(initial);
+  const [section, setSection] = useState<EditorSection>('basic');
+  const editorId = useId();
+  const editorRef = useRef<HTMLFieldSetElement>(null);
+  const chooseSection = (next: EditorSection) => {
+    setSection(next);
+    editorRef.current?.scrollTo({ top: 0 });
+  };
   const [index, setIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -261,6 +275,41 @@ export function Recognition({
     if (incomplete) setReviewIssues(true);
     else void save();
   };
+  const extraField = ([key, label]: (typeof extraFields)[number]) => (
+    <label key={key}>
+      {key === 'skuCode' ? '规格编码（选填）' : label}
+      <>
+        {key === 'freight' ? (
+          <select
+            aria-label="运费模板"
+            value={p.freight}
+            onChange={(e) => field('freight', e.target.value)}
+          >
+            <option value="">选店后确认</option>
+            {freightOptions(p.freight, existing).map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            aria-label={label}
+            value={p[key]}
+            placeholder={key === 'discount' ? '留空，选店后确认' : undefined}
+            onChange={(e) => field(key, e.target.value)}
+          />
+        )}
+      </>
+      {key === 'freight' ? (
+        <p className="quiet-note">
+          可选择常用模板；导入或已保存的其他模板会保留，执行时按目标店铺核对。
+        </p>
+      ) : key === 'discount' ? (
+        <p className="quiet-note">留空时待选店后确认，不自动确定值。</p>
+      ) : null}
+    </label>
+  );
   const requestSave = () => {
     if (busy) return;
     setError('');
@@ -276,7 +325,8 @@ export function Recognition({
   return (
     <>
       <Modal
-        title="确认商品资料"
+        title="编辑商品资料"
+        className="product-editor-modal"
         subtitle={`${products.length} 件商品 · ${products.reduce((n, p) => n + p.skus.length, 0)} 个组合${incomplete ? ` · ${incomplete} 件待补充` : missingImageCount ? ` · ${missingImageCount} 个组合未添加规格图` : ' · 本机检查通过'}`}
         wide
         onClose={requestClose}
@@ -315,7 +365,21 @@ export function Recognition({
               ) : missingImageCount ? (
                 <span className="pending-summary" role="status">
                   <AlertCircle size={15} />
-                  {missingImageCount} 个组合未添加规格图，请在资料中核对；是否必填按后台类目要求。
+                  {missingImageCount} 个组合未添加规格图
+                  <button
+                    className="text-button"
+                    disabled={busy}
+                    onClick={() => {
+                      const next = products.findIndex(
+                        (product) =>
+                          choiceFor(product) !== 'skip' && missingSkuImages(product).length,
+                      );
+                      if (next >= 0) setIndex(next);
+                      chooseSection('skus');
+                    }}
+                  >
+                    去补充
+                  </button>
                 </span>
               ) : (
                 '保存到本机资料库，再选择执行店铺。'
@@ -347,6 +411,7 @@ export function Recognition({
                 className={`recognition-item ${i === index ? 'active' : ''}`}
                 onClick={() => {
                   setIndex(i);
+                  editorRef.current?.scrollTo({ top: 0 });
                   setExported(false);
                   setExportError('');
                   setImageError('');
@@ -367,331 +432,416 @@ export function Recognition({
               </button>
             ))}
           </aside>
-          <fieldset className="editor" disabled={busy}>
-            {exported ? (
-              <p className="success-message" role="status">
-                含图 Excel 已导出。图片已嵌入，发给同事即可直接导入。
-              </p>
-            ) : null}
-            {error ? (
-              <div className="error-message" role="alert">
-                {error}
-              </div>
-            ) : null}
-            {conflicts.length ? (
-              <div className="duplicate-banner">
-                <div>
-                  <strong>发现 {conflicts.length} 件同编码商品</strong>
-                  <p>可核对变化后更新已有资料，或跳过本次导入。</p>
-                </div>
-                <button className="button" disabled={busy} onClick={() => setReviewUpdates(true)}>
-                  核对重复商品
+          <div className="editor-workspace">
+            <nav className="editor-tabs" role="tablist" aria-label="商品资料分区">
+              {editorSections.map(({ id, label }, tabIndex) => (
+                <button
+                  key={id}
+                  id={`${editorId}-${id}-tab`}
+                  role="tab"
+                  type="button"
+                  aria-selected={section === id}
+                  aria-controls={`${editorId}-${id}-panel`}
+                  tabIndex={section === id ? 0 : -1}
+                  disabled={busy}
+                  onClick={() => chooseSection(id)}
+                  onKeyDown={(event) => {
+                    let next = tabIndex;
+                    if (event.key === 'ArrowRight') next = (tabIndex + 1) % editorSections.length;
+                    else if (event.key === 'ArrowLeft')
+                      next = (tabIndex + editorSections.length - 1) % editorSections.length;
+                    else if (event.key === 'Home') next = 0;
+                    else if (event.key === 'End') next = editorSections.length - 1;
+                    else return;
+                    event.preventDefault();
+                    chooseSection(editorSections[next].id);
+                    event.currentTarget.parentElement
+                      ?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+                      [next]?.focus();
+                  }}
+                >
+                  {label}
+                  {id === 'skus' ? (
+                    <span
+                      className={
+                        missingSkuImages(p).length ? 'editor-tab-count warning' : 'editor-tab-count'
+                      }
+                    >
+                      {missingSkuImages(p).length
+                        ? `${missingSkuImages(p).length} 缺图`
+                        : p.skus.length}
+                    </span>
+                  ) : null}
+                  {id === 'images' ? (
+                    <span className="editor-tab-count">{p.main.length + p.detail.length}</span>
+                  ) : null}
                 </button>
-              </div>
-            ) : null}
-            <div className="section-title">
-              <h3>基本资料</h3>
-              <span>{p.source}</span>
-            </div>
-            <div className="field-grid">
-              {fields.map(([key, label]) => (
-                <label key={key} className={key === 'title' || key === 'category' ? 'full' : ''}>
-                  {key === 'brand' ? '商品品牌' : label}
-                  <input
-                    value={p[key]}
-                    onChange={(e) => field(key, e.target.value)}
-                    aria-invalid={['code', 'title', 'category'].includes(key) && !p[key].trim()}
-                    maxLength={key === 'title' ? 80 : 200}
-                    placeholder={key === 'category' ? '例如：足浴盆/足浴桶' : undefined}
-                  />
-                  {key === 'brand' ? (
-                    <p className="quiet-note">可留空，选店后确认品牌及资质。</p>
-                  ) : null}
-                  {key === 'category' ? (
-                    <p className="quiet-note">
-                      只需填写最后一级类目；填写完整路径时，也按最后一级匹配。
-                    </p>
-                  ) : null}
-                </label>
               ))}
-            </div>
-            <div className="section-title">
-              <h3>规格、价格与库存</h3>
-              <button
-                className="text-button"
-                disabled={busy || p.skus.length >= 100}
-                onClick={() =>
-                  update((p) => ({
-                    ...p,
-                    skus: [
-                      ...p.skus,
-                      {
-                        spec: isStructuredProduct(p) ? '默认规格' : '',
-                        group: '',
-                        single: '',
-                        stock: '',
-                        code: '',
-                        image: '',
-                        options: [],
-                      },
-                    ],
-                  }))
-                }
+            </nav>
+            <fieldset className="editor editor-panels" ref={editorRef} disabled={busy}>
+              {exported ? (
+                <p className="success-message" role="status">
+                  含图 Excel 已导出。图片已嵌入，发给同事即可直接导入。
+                </p>
+              ) : null}
+              {error ? (
+                <div className="error-message" role="alert">
+                  {error}
+                </div>
+              ) : null}
+              {conflicts.length ? (
+                <div className="duplicate-banner">
+                  <div>
+                    <strong>发现 {conflicts.length} 件同编码商品</strong>
+                    <p>可核对变化后更新已有资料，或跳过本次导入。</p>
+                  </div>
+                  <button className="button" disabled={busy} onClick={() => setReviewUpdates(true)}>
+                    核对重复商品
+                  </button>
+                </div>
+              ) : null}
+              <section
+                role="tabpanel"
+                id={`${editorId}-basic-panel`}
+                aria-labelledby={`${editorId}-basic-tab`}
+                hidden={section !== 'basic'}
+                className="editor-panel"
               >
-                <Plus size={15} />
-                添加规格组合
-              </button>
-            </div>
-            {isStructuredProduct(p) ? (
-              <SkuEditor
-                product={p}
-                disabled={busy}
-                onChange={(skus) => update((p) => ({ ...p, skus }))}
-                onImage={(target) => void supplement(target)}
-                onPreview={(asset) => {
-                  setOriginalSize(false);
-                  setPreview(asset);
-                }}
-              />
-            ) : (
-              <div className="table-scroll">
-                <table className="sku-table">
-                  <thead>
-                    <tr>
-                      <th>规格</th>
-                      <th>拼单价（元）</th>
-                      <th>单买价（元）</th>
-                      <th>库存</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {p.skus.map((sku, n) => (
-                      <tr key={n}>
-                        {(['spec', 'group', 'single', 'stock'] as const).map((key, col) => (
-                          <td key={key}>
-                            <input
-                              disabled={busy}
-                              aria-label={`第 ${n + 1} 个规格${['名称', '拼单价', '单买价', '库存'][col]}`}
-                              value={sku[key]}
-                              inputMode={
-                                key === 'spec' ? 'text' : key === 'stock' ? 'numeric' : 'decimal'
-                              }
-                              onChange={(e) =>
-                                update((p) => ({
-                                  ...p,
-                                  skus: p.skus.map((s, i) =>
-                                    i === n ? { ...s, [key]: e.target.value } : s,
-                                  ),
-                                }))
-                              }
-                            />
-                          </td>
-                        ))}
-                        <td>
-                          <button
-                            className="icon-button small"
-                            aria-label={`删除第 ${n + 1} 个规格`}
-                            disabled={busy || p.skus.length === 1}
-                            onClick={() =>
-                              update((p) => ({ ...p, skus: p.skus.filter((_, i) => i !== n) }))
-                            }
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {isStructuredProduct(p) ? (
-              <>
                 <div className="section-title">
-                  <h3>其他类目属性</h3>
+                  <h3>基本资料</h3>
+                  <span>{p.source}</span>
+                </div>
+                <div className="field-grid">
+                  {fields.map(([key, label]) => (
+                    <label
+                      key={key}
+                      className={key === 'title' || key === 'category' ? 'full' : ''}
+                    >
+                      {key === 'brand' ? '商品品牌' : label}
+                      <input
+                        aria-label={key === 'brand' ? '商品品牌' : label}
+                        value={p[key]}
+                        onChange={(e) => field(key, e.target.value)}
+                        aria-invalid={['code', 'title', 'category'].includes(key) && !p[key].trim()}
+                        maxLength={key === 'title' ? 80 : 200}
+                        placeholder={key === 'category' ? '例如：足浴盆/足浴桶' : undefined}
+                      />
+                      {key === 'brand' ? (
+                        <p className="quiet-note">可留空，选店后确认品牌及资质。</p>
+                      ) : null}
+                      {key === 'category' ? (
+                        <p className="quiet-note">
+                          只需填写最后一级类目；填写完整路径时，也按最后一级匹配。
+                        </p>
+                      ) : null}
+                    </label>
+                  ))}
+                </div>
+                <div className="field-grid editor-basic-extra">
+                  {extraFields.filter(([key]) => key === 'foldable').map(extraField)}
+                </div>
+                {isStructuredProduct(p) ? (
+                  <details className="editor-attributes" open={!!p.attributes?.length}>
+                    <summary>
+                      更多类目属性
+                      {p.attributes?.length ? `（${p.attributes.length} 项）` : '（选填）'}
+                    </summary>
+                    <div className="section-title">
+                      <h3>其他类目属性</h3>
+                      <button
+                        className="text-button"
+                        disabled={busy || (p.attributes?.length || 0) >= 50}
+                        onClick={() =>
+                          update((p) => ({
+                            ...p,
+                            attributes: [
+                              ...(p.attributes || []),
+                              { name: '', value: '', required: false },
+                            ],
+                          }))
+                        }
+                      >
+                        <Plus size={15} />
+                        添加属性
+                      </button>
+                    </div>
+                    {(p.attributes || []).map((a, n) => (
+                      <div className="attribute-row" key={n}>
+                        <input
+                          aria-label={`属性 ${n + 1} 名称`}
+                          placeholder="后台属性名称"
+                          value={a.name}
+                          onChange={(e) =>
+                            update((p) => ({
+                              ...p,
+                              attributes: p.attributes?.map((x, i) =>
+                                i === n ? { ...x, name: e.target.value } : x,
+                              ),
+                            }))
+                          }
+                        />
+                        <input
+                          aria-label={`属性 ${n + 1} 值`}
+                          placeholder="对应可选值"
+                          value={a.value}
+                          onChange={(e) =>
+                            update((p) => ({
+                              ...p,
+                              attributes: p.attributes?.map((x, i) =>
+                                i === n ? { ...x, value: e.target.value } : x,
+                              ),
+                            }))
+                          }
+                        />
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={a.required}
+                            onChange={(e) =>
+                              update((p) => ({
+                                ...p,
+                                attributes: p.attributes?.map((x, i) =>
+                                  i === n ? { ...x, required: e.target.checked } : x,
+                                ),
+                              }))
+                            }
+                          />
+                          后台必填
+                        </label>
+                        <button
+                          className="icon-button small"
+                          aria-label={`删除属性 ${n + 1}`}
+                          onClick={() =>
+                            update((p) => ({
+                              ...p,
+                              attributes: p.attributes?.filter((_, i) => i !== n),
+                            }))
+                          }
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    ))}
+                    <p className="quiet-note">
+                      属性名称与值按当前类目填写；“后台必填”以该类目实际要求为准，不由运营自行决定。后台要求在执行前核验。
+                    </p>
+                  </details>
+                ) : null}
+              </section>
+              <section
+                role="tabpanel"
+                id={`${editorId}-skus-panel`}
+                aria-labelledby={`${editorId}-skus-tab`}
+                hidden={section !== 'skus'}
+                className="editor-panel"
+              >
+                <div className="section-title">
+                  <h3>规格、价格与库存</h3>
                   <button
                     className="text-button"
-                    disabled={busy || (p.attributes?.length || 0) >= 50}
+                    disabled={busy || p.skus.length >= 100}
                     onClick={() =>
                       update((p) => ({
                         ...p,
-                        attributes: [
-                          ...(p.attributes || []),
-                          { name: '', value: '', required: false },
+                        skus: [
+                          ...p.skus,
+                          {
+                            spec: isStructuredProduct(p) ? '默认规格' : '',
+                            group: '',
+                            single: '',
+                            stock: '',
+                            code: '',
+                            image: '',
+                            options: (p.skus[0]?.options || []).map((option) => ({
+                              name: option.name,
+                              value: '',
+                            })),
+                          },
                         ],
                       }))
                     }
                   >
                     <Plus size={15} />
-                    添加属性
+                    添加规格组合
                   </button>
                 </div>
-                {(p.attributes || []).map((a, n) => (
-                  <div className="attribute-row" key={n}>
-                    <input
-                      aria-label={`属性 ${n + 1} 名称`}
-                      placeholder="后台属性名称"
-                      value={a.name}
-                      onChange={(e) =>
-                        update((p) => ({
-                          ...p,
-                          attributes: p.attributes?.map((x, i) =>
-                            i === n ? { ...x, name: e.target.value } : x,
-                          ),
-                        }))
-                      }
-                    />
-                    <input
-                      aria-label={`属性 ${n + 1} 值`}
-                      placeholder="对应可选值"
-                      value={a.value}
-                      onChange={(e) =>
-                        update((p) => ({
-                          ...p,
-                          attributes: p.attributes?.map((x, i) =>
-                            i === n ? { ...x, value: e.target.value } : x,
-                          ),
-                        }))
-                      }
-                    />
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={a.required}
-                        onChange={(e) =>
-                          update((p) => ({
-                            ...p,
-                            attributes: p.attributes?.map((x, i) =>
-                              i === n ? { ...x, required: e.target.checked } : x,
-                            ),
-                          }))
-                        }
-                      />
-                      后台必填
-                    </label>
-                    <button
-                      className="icon-button small"
-                      aria-label={`删除属性 ${n + 1}`}
-                      onClick={() =>
-                        update((p) => ({
-                          ...p,
-                          attributes: p.attributes?.filter((_, i) => i !== n),
-                        }))
-                      }
-                    >
-                      <Trash2 size={15} />
-                    </button>
+                {isStructuredProduct(p) ? (
+                  <SkuEditor
+                    product={p}
+                    disabled={busy}
+                    pricingFields={extraFields
+                      .filter(([key]) => key === 'reference' || key === 'discount')
+                      .map(extraField)}
+                    onChange={(skus) => update((p) => ({ ...p, skus }))}
+                    onImage={(target) => void supplement(target)}
+                    onPreview={(asset) => {
+                      setOriginalSize(false);
+                      setPreview(asset);
+                    }}
+                  />
+                ) : (
+                  <div className="table-scroll">
+                    <table className="sku-table">
+                      <thead>
+                        <tr>
+                          <th>规格</th>
+                          <th>拼单价（元）</th>
+                          <th>单买价（元）</th>
+                          <th>库存</th>
+                          <th />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {p.skus.map((sku, n) => (
+                          <tr key={n}>
+                            {(['spec', 'group', 'single', 'stock'] as const).map((key, col) => (
+                              <td key={key}>
+                                <input
+                                  disabled={busy}
+                                  aria-label={`第 ${n + 1} 个规格${['名称', '拼单价', '单买价', '库存'][col]}`}
+                                  value={sku[key]}
+                                  inputMode={
+                                    key === 'spec'
+                                      ? 'text'
+                                      : key === 'stock'
+                                        ? 'numeric'
+                                        : 'decimal'
+                                  }
+                                  onChange={(e) =>
+                                    update((p) => ({
+                                      ...p,
+                                      skus: p.skus.map((s, i) =>
+                                        i === n ? { ...s, [key]: e.target.value } : s,
+                                      ),
+                                    }))
+                                  }
+                                />
+                              </td>
+                            ))}
+                            <td>
+                              <button
+                                className="icon-button small"
+                                aria-label={`删除第 ${n + 1} 个规格`}
+                                disabled={busy || p.skus.length === 1}
+                                onClick={() =>
+                                  update((p) => ({ ...p, skus: p.skus.filter((_, i) => i !== n) }))
+                                }
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                ))}
-                <p className="quiet-note">
-                  属性名称与值按当前类目填写；“后台必填”以该类目实际要求为准，不由运营自行决定。后台要求在执行前核验。
-                </p>
+                )}
+                {!isStructuredProduct(p) ? (
+                  <div className="editor-price-settings field-grid">
+                    {extraFields
+                      .filter(
+                        ([key]) =>
+                          key === 'reference' ||
+                          key === 'discount' ||
+                          (!isStructuredProduct(p) && key === 'skuCode'),
+                      )
+                      .map(extraField)}
+                  </div>
+                ) : null}
+              </section>
+              <section
+                role="tabpanel"
+                id={`${editorId}-images-panel`}
+                aria-labelledby={`${editorId}-images-tab`}
+                hidden={section !== 'images'}
+                className="editor-panel"
+              >
                 <div className="section-title">
-                  <h3>服务与承诺</h3>
+                  <h3>商品图片</h3>
+                </div>
+                <p className="quiet-note">
+                  可批量添加轮播图和详情图，无需先插进 Excel。核对顺序后，点击“导出当前商品
+                  Excel”，系统会自动嵌入图片。
+                </p>
+                <PictureEditor
+                  product={p}
+                  disabled={busy}
+                  onChange={(key, names) => update((p) => ({ ...p, [key]: names }))}
+                  onImage={(target) => void supplement(target)}
+                  onPreview={(asset) => {
+                    setOriginalSize(false);
+                    setPreview(asset);
+                  }}
+                />
+              </section>
+              <section
+                role="tabpanel"
+                id={`${editorId}-settings-panel`}
+                aria-labelledby={`${editorId}-settings-tab`}
+                hidden={section !== 'settings'}
+                className="editor-panel"
+              >
+                <div className="section-title">
+                  <h3>发货设置</h3>
                 </div>
                 <div className="field-grid">
-                  {(
-                    [
-                      ['sevenDay', '7天无理由退货'],
-                      ['invoice', '正品发票'],
-                      ['authenticity', '假一赔十'],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <label key={key}>
-                      {label}
-                      <select
-                        value={p.services?.[key] ?? (key === 'sevenDay' ? '按平台规则' : '否')}
-                        onChange={(e) =>
-                          update((p) => ({
-                            ...p,
-                            services: {
-                              sevenDay: '按平台规则',
-                              invoice: '否',
-                              authenticity: '否',
-                              ...p.services,
-                              [key]: e.target.value,
-                            },
-                          }))
-                        }
-                      >
-                        {p.services?.[key] === '' ? <option value="">未读取，请确认</option> : null}
-                        {['是', '否', '按平台规则'].map((v) => (
-                          <option key={v}>{v}</option>
-                        ))}
-                      </select>
-                    </label>
-                  ))}
+                  {extraFields
+                    .filter(
+                      ([key]) => !['reference', 'discount', 'skuCode', 'foldable'].includes(key),
+                    )
+                    .map(extraField)}
                 </div>
-              </>
-            ) : null}
-            <div className="section-title">
-              <h3>商品图片</h3>
-            </div>
-            <p className="quiet-note">
-              可批量添加轮播图和详情图，无需先插进 Excel。核对顺序后，点击“导出当前商品
-              Excel”，系统会自动嵌入图片。
-            </p>
-            <PictureEditor
-              product={p}
-              disabled={busy}
-              onChange={(key, names) => update((p) => ({ ...p, [key]: names }))}
-              onImage={(target) => void supplement(target)}
-              onPreview={(asset) => {
-                setOriginalSize(false);
-                setPreview(asset);
-              }}
-            />
-            <details className="extra-fields">
-              <summary>
-                其他商品设置 <ChevronDown size={15} />
-              </summary>
-              <div className="field-grid">
-                {extraFields
-                  .filter(([key]) => !isStructuredProduct(p) || key !== 'skuCode')
-                  .map(([key, label]) => (
-                    <label key={key}>
-                      {key === 'skuCode' ? '规格编码（选填）' : label}
-                      <>
-                        {key === 'freight' ? (
+                {isStructuredProduct(p) ? (
+                  <>
+                    <div className="section-title">
+                      <h3>服务与承诺</h3>
+                    </div>
+                    <div className="field-grid">
+                      {(
+                        [
+                          ['sevenDay', '7天无理由退货'],
+                          ['invoice', '正品发票'],
+                          ['authenticity', '假一赔十'],
+                        ] as const
+                      ).map(([key, label]) => (
+                        <label key={key}>
+                          {label}
                           <select
-                            aria-label="运费模板"
-                            value={p.freight}
-                            onChange={(e) => field('freight', e.target.value)}
+                            value={p.services?.[key] ?? (key === 'sevenDay' ? '按平台规则' : '否')}
+                            onChange={(e) =>
+                              update((p) => ({
+                                ...p,
+                                services: {
+                                  sevenDay: '按平台规则',
+                                  invoice: '否',
+                                  authenticity: '否',
+                                  ...p.services,
+                                  [key]: e.target.value,
+                                },
+                              }))
+                            }
                           >
-                            <option value="">选店后确认</option>
-                            {freightOptions(p.freight, existing).map((value) => (
-                              <option key={value} value={value}>
-                                {value}
-                              </option>
+                            {p.services?.[key] === '' ? (
+                              <option value="">未读取，请确认</option>
+                            ) : null}
+                            {['是', '否', '按平台规则'].map((v) => (
+                              <option key={v}>{v}</option>
                             ))}
                           </select>
-                        ) : (
-                          <input
-                            value={p[key]}
-                            placeholder={key === 'discount' ? '留空，选店后确认' : undefined}
-                            onChange={(e) => field(key, e.target.value)}
-                          />
-                        )}
-                      </>
-                      {key === 'freight' ? (
-                        <p className="quiet-note">
-                          可选择常用模板；导入或已保存的其他模板会保留，执行时按目标店铺核对。
-                        </p>
-                      ) : key === 'discount' ? (
-                        <p className="quiet-note">留空时待选店后确认，不自动确定值。</p>
-                      ) : null}
-                    </label>
-                  ))}
-              </div>
-            </details>
-            {!issues.length && !missingSkuImages(p).length ? (
-              <div className="complete-note">
-                <CheckCircle2 size={16} />
-                本机检查通过，保存后可选择店铺；后台规则仍需核验。
-              </div>
-            ) : null}
-          </fieldset>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
+              </section>
+              {!issues.length && !missingSkuImages(p).length ? (
+                <div className="complete-note">
+                  <CheckCircle2 size={16} />
+                  本机检查通过，保存后可选择店铺；后台规则仍需核验。
+                </div>
+              ) : null}
+            </fieldset>
+          </div>
         </div>
       </Modal>
       {showImageIssues ? (
