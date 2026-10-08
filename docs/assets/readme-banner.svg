@@ -23,7 +23,7 @@
     <text x="66" y="250" fill="#c6d3ec" font-size="24">把商品资料，变成可核对的后台草稿。</text>
     <text x="66" y="294" fill="#93a9cc" font-size="17">Excel 导入 / 多规格编辑 / 真实浏览器执行 / 本机记录</text>
     <g transform="translate(64 345)" font-size="14" font-weight="500">
-      <rect width="110" height="34" rx="17" fill="#2a4165"/><text x="55" y="23" text-anchor="middle" fill="#e2eafb">v0.1.45</text>
+      <rect width="110" height="34" rx="17" fill="#2a4165"/><text x="55" y="23" text-anchor="middle" fill="#e2eafb">v0.1.61</text>
       <rect x="122" width="192" height="34" rx="17" fill="#2a4165"/><text x="218" y="23" text-anchor="middle" fill="#e2eafb">Windows · macOS</text>
       <rect x="326" width="112" height="34" rx="17" fill="#254c48"/><text x="382" y="23" text-anchor="middle" fill="#9ce7c1">草稿模式</text>
     </g>
