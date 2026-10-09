@@ -278,12 +278,37 @@ test('a fully filled original SKU matrix is read and reused without adding or re
 
 test('conflicting existing spec values stop before mutating the original form', async () => {
   const f = fixture([{ name: '颜色', values: ['红'] }]);
-  await assert.rejects(
-    f.adapter.skus(product()),
-    (error) => error.code === 'form_changed' && error.recovery === 'restart_form',
-  );
+  await assert.rejects(f.adapter.skus(product()), (error) => {
+    assert.equal(error.code, 'form_changed');
+    assert.equal(error.recovery, 'restart_form');
+    assert.match(error.message, /资料未包含的选项“红”/);
+    assert.equal(error.details.source, 'spec_conflict');
+    assert.deepEqual(error.details.expected[0], { name: '颜色', values: ['紫', '灰'] });
+    assert.deepEqual(error.details.observed[0].values, ['红']);
+    return true;
+  });
   assert.deepEqual(f.calls, []);
   assert.deepEqual(f.rows[0].values, ['红']);
+  for (const [rows, message] of [
+    [[{ name: '款式', values: [] }], /第 1 组类型：后台“款式”，资料“颜色”/],
+    [
+      [
+        { name: '', values: [] },
+        { name: '', values: [] },
+        { name: '', values: [] },
+      ],
+      /后台有 3 组规格，资料有 2 组/,
+    ],
+    [[{ name: '颜色', values: ['紫', '紫'] }], /第 1 组读到重复选项/],
+  ]) {
+    const conflict = fixture(rows);
+    await assert.rejects(conflict.adapter.skus(product()), (error) => {
+      assert.match(error.message, message);
+      assert.equal(error.details.observedRowCount, rows.length);
+      return true;
+    });
+    assert.deepEqual(conflict.calls, []);
+  }
 });
 
 test('an incomplete Cartesian product is rejected before touching any browser control', async () => {
@@ -338,17 +363,19 @@ test('current DOM spec reader chooses only visible editable known value inputs a
     };
   }
   const type = input('规格类型1', '颜色');
+  const hiddenType = input('规格类型1', '套餐', { hidden: true });
   const filled = input('请输入规格名称', '紫');
   const readonly = input('请输入规格名称', '', { readOnly: true });
   const disabled = input('请输入规格名称', '', { disabled: true });
   const editable = input('请输入规格名称');
   const hidden = input('请输入规格名称', '不得读取的隐藏值', { hidden: true });
-  const inputs = [type, filled, readonly, disabled, editable, hidden];
+  const inputs = [type, filled, readonly, disabled, editable, hidden, hiddenType];
   const row = {
     getClientRects: () => [{}],
     querySelector: () => type,
     querySelectorAll(selector) {
-      if (selector === 'input[placeholder="请输入规格名称"]') return inputs.slice(1);
+      if (selector === 'input[placeholder^="规格类型"]') return [hiddenType, type];
+      if (selector === 'input[placeholder="请输入规格名称"]') return inputs.slice(1, -1);
       if (selector === 'input') return inputs;
       if (selector === 'button,[role=button]')
         return [{ textContent: '添加选项', getClientRects: () => [{}] }];
@@ -378,6 +405,8 @@ test('current DOM spec reader chooses only visible editable known value inputs a
   };
   const [state] = await adapter.specRows();
   assert.equal(state.name, '颜色');
+  assert.equal(hiddenType.attrs.has('data-goods-spec-type'), false);
+  assert.equal(type.attrs.get('data-goods-spec-type'), '0');
   assert.deepEqual(state.values, ['紫']);
   assert.equal(editable.attrs.get('data-goods-spec-empty'), '0');
   assert.equal(readonly.attrs.has('data-goods-spec-empty'), false);
@@ -385,6 +414,8 @@ test('current DOM spec reader chooses only visible editable known value inputs a
   assert.equal(hidden.attrs.has('data-goods-spec-empty'), false);
   assert.ok(!JSON.stringify(state).includes('不得读取的隐藏值'));
   assert.deepEqual(state.buttons, ['添加选项']);
+  hiddenType.hidden = false;
+  await assert.rejects(adapter.specRows(), /多个可见的类型控件.*无法唯一核对/);
 });
 
 test('complete matching values with a default one-row table are recommitted with keyboard input and stop once all six combinations exist', async () => {

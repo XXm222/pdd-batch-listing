@@ -179,6 +179,16 @@ export type Task = {
   status: TaskStatus;
   time: string;
   productSnapshot: Product;
+  /** New PDD tasks use API; absent on legacy tasks. Retries keep their original writer. */
+  executionMode?: 'pdd_api';
+  apiDraft?: {
+    createAttemptedAt?: string;
+    commitId?: string;
+    categoryId?: number;
+    freightId?: number;
+    services?: { refund: number; invoice: number; authenticity: number };
+    uploads?: Record<string, { url: string; width: number; height: number }>;
+  };
   backendChecks?: BackendCheck[];
   phase?: string;
   message?: string;

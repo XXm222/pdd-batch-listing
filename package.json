@@ -1,7 +1,7 @@
 {
   "name": "goods-workspace",
   "productName": "商品运营台",
-  "version": "0.1.61",
+  "version": "0.1.63",
   "private": true,
   "description": "商品资料导入与店铺草稿工作台",
   "author": "商品运营台项目",
@@ -45,7 +45,7 @@
     "appId": "com.goodsworkspace.desktop",
     "productName": "商品运营台",
     "directories": {
-      "output": "release/0.1.61"
+      "output": "release/0.1.63"
     },
     "files": [
       "dist/**",

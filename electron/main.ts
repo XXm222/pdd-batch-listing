@@ -55,8 +55,14 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 app.setName('商品运营台');
+const apiDraftPreview =
+  app.isPackaged &&
+  JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8'))
+    .goodsApiDraftPreview === true;
 if (process.env.GOODS_WORKSPACE_DATA_DIR)
   app.setPath('userData', path.resolve(process.env.GOODS_WORKSPACE_DATA_DIR));
+else if (apiDraftPreview)
+  app.setPath('userData', path.join(app.getPath('appData'), '商品运营台-API试用'));
 let window: BrowserWindow | null = null;
 let store: Store;
 let encryptionAvailable = false;
@@ -211,7 +217,7 @@ async function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 680,
-    title: '商品运营台',
+    title: apiDraftPreview ? '商品运营台 · API试用版' : '商品运营台',
     backgroundColor: '#f5f6f8',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -223,6 +229,7 @@ async function createWindow() {
     },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  if (apiDraftPreview) window.on('page-title-updated', (event) => event.preventDefault());
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) =>
     callback(false),

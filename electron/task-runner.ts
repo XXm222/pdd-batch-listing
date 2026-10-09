@@ -57,6 +57,7 @@ export function prepareTasks(
     status: 'prepared',
     time: new Date().toISOString(),
     productSnapshot: structuredClone(p!),
+    ...(platform === 'pdd' ? { executionMode: 'pdd_api' as const } : {}),
     backendChecks: initialChecks(),
   }));
   store.saveTasks(tasks);

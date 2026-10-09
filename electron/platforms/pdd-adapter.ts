@@ -25,6 +25,7 @@ import {
 } from './pdd-identity';
 import { PDD_DISCOUNT_STATE, type DiscountPageFacts } from './pdd-discount';
 import { BrowserBridge, flatten } from '../browser-bridge';
+import { PddApiDraft } from './pdd-api-draft';
 import { ExecutionError, type ExecutionContext } from '../execution';
 import type { Product, Shop, Task, TaskStep, BackendCheck, ShopLoginEvent } from '../../src/types';
 import type { LoginPageFacts, PageFacts, PageRecovery, RecoveryResult } from '../agent-service';
@@ -582,6 +583,14 @@ export class PddAdapter {
       await this.bridge.connect();
     });
     await this.timed(t, '登录与核对店铺', async () => await this.login(shop, t, loginCheckOnly));
+    if (t.executionMode === 'pdd_api') {
+      await new PddApiDraft(this.bridge, this.directory, () => this.checkIdentity(shop)).execute(
+        t,
+        shop,
+        context,
+      );
+      return;
+    }
     if (t.saveAttemptedAt) {
       await this.readback(t, shop);
       return;
@@ -807,12 +816,47 @@ export class PddAdapter {
             new Set(row.values).size !== row.values.length ||
             row.values.some((v) => !values[i]?.includes(v)),
         )
-      )
+      ) {
+        const index = rows.findIndex(
+          (row, i) =>
+            (row.name && row.name !== names[i]) ||
+            new Set(row.values).size !== row.values.length ||
+            row.values.some((value) => !values[i]?.includes(value)),
+        );
+        const row = rows[index];
+        const reason =
+          rows.length > names.length
+            ? `后台有 ${rows.length} 组规格，资料有 ${names.length} 组`
+            : row.name && row.name !== names[index]
+              ? `第 ${index + 1} 组类型：后台“${row.name}”，资料“${names[index]}”`
+              : new Set(row.values).size !== row.values.length
+                ? `第 ${index + 1} 组读到重复选项`
+                : `第 ${index + 1} 组有资料未包含的选项“${row.values.find((value) => !values[index]?.includes(value))}”`;
+        const expected = names.map((name, i) => ({ name, values: values[i] }));
+        const observed = rows.slice(0, 4).map((row) => ({
+          name: row.name,
+          values: row.values.slice(0, 100),
+          inputs: row.controls || [],
+          buttons: row.buttons || [],
+          choices: row.choices || [],
+        }));
+        const describe = (specs: { name: string; values: string[] }[]) =>
+          specs.length
+            ? specs
+                .map(
+                  (spec) =>
+                    `${spec.name || '未选择类型'}：[${spec.values.slice(0, 6).join('、') || '未填写选项'}${spec.values.length > 6 ? '…' : ''}]`,
+                )
+                .join('；')
+            : '无可选规格';
         throw new ExecutionError(
           'form_changed',
-          '原填写页规格与资料不一致，请核对；重新开始前会查询旧编号',
+          `原填写页规格与资料不一致：${reason}。资料：${describe(expected)}。后台：${describe(observed)}。请核对原页；重新开始前会查询旧编号`,
           'restart_form',
+          true,
+          { source: 'spec_conflict', reason, expected, observed, observedRowCount: rows.length },
         );
+      }
       return rows;
     };
     await read();
@@ -1389,7 +1433,9 @@ export class PddAdapter {
     const visible=e=>e.getClientRects().length>0&&getComputedStyle(e).visibility!=='hidden';
     for(const e of document.querySelectorAll('[data-goods-spec-type],[data-goods-spec-empty],[data-goods-spec-value]')){e.removeAttribute('data-goods-spec-type');e.removeAttribute('data-goods-spec-empty');e.removeAttribute('data-goods-spec-value');}
     return [...document.querySelectorAll('.goods-spec-row')].filter(visible).map((row,index)=>{
-      const type=row.querySelector('input[placeholder^="规格类型"]');
+      const types=[...row.querySelectorAll('input[placeholder^="规格类型"]')].filter(visible);
+      if(types.length>1)throw Error('同一规格行有多个可见的类型控件，无法唯一核对；未改写规格');
+      const type=types[0];
       if(type)type.setAttribute('data-goods-spec-type',String(index));
       const inputs=[...row.querySelectorAll('input[placeholder="请输入规格名称"]')].filter(visible);
       const filled=inputs.filter(e=>e.value),valueSelectors=filled.map((e,valueIndex)=>{e.setAttribute('data-goods-spec-value',index+'-'+valueIndex);return '[data-goods-spec-value="'+index+'-'+valueIndex+'"]';});

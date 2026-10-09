@@ -129,6 +129,17 @@ const browserForbiddenAdapter = {
 };
 const browserForbidden = () => browserForbiddenAdapter;
 
+test('新任务默认API，旧任务保留原执行方式与原编号', async (t) => {
+  const f = await fixture(t);
+  const legacy = succeededTask(f.products[0], f.shop);
+  f.store.saveTasks([legacy]);
+  const before = readTask(f.store, legacy.id);
+  const created = prepareTasks(f.store, inputFor(f))[0];
+  assert.equal(readTask(f.store, created).executionMode, 'pdd_api');
+  assert.equal(readTask(f.store, legacy.id).executionMode, undefined);
+  assert.deepEqual(readTask(f.store, legacy.id), before);
+});
+
 test('成功历史即使有保存标记，也可新建；原记录完全保留，新任务不继承执行状态', async (t) => {
   const f = await fixture(t);
   const old = succeededTask(f.products[0], f.shop);
