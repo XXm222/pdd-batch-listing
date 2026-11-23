@@ -263,7 +263,8 @@ test('SQLite 重开保留资料，重复编码事务失败不污染已保存商�
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
-test('一份表坏了不影响其余表导入，失败原因逐份返回', async () => {  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'goods-tolerant-'));
+test('一份表坏了不影响其余表导入，失败原因逐份返回', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'goods-tolerant-'));
   try {
     await patchedExample(path.join(tmp, 'good.xlsx'), { 1: { B19: 'TEST-OK' } });
     await patchedExample(path.join(tmp, 'bad.xlsx'), { 1: { B15: 'FORMULA_NO_VALUE' } });
@@ -290,7 +291,13 @@ test('上架前体检点出库存为零、参考价偏低与缺轮辋直径', ()
     install: { delivery: 'store', template: '到店模版1' },
     skus: [
       { options: [{ name: '型号', value: 'A' }], group: '600', single: '800', stock: '0', rim: '' },
-      { options: [{ name: '型号', value: 'B' }], group: '600', single: '800', stock: '5', rim: '18英寸' },
+      {
+        options: [{ name: '型号', value: 'B' }],
+        group: '600',
+        single: '800',
+        stock: '5',
+        rim: '18英寸',
+      },
     ],
   };
   const issues = preflight(base);
@@ -299,7 +306,12 @@ test('上架前体检点出库存为零、参考价偏低与缺轮辋直径', ()
   assert.ok(issues.some((line) => /1 个规格缺轮辋直径/.test(line)));
   assert.match(preflightNotice([base]), /^导入完成，有 3 条上架前待处理：CHECK-1：/);
   // 没开到店安装时不该报轮辋直径与模板缺失。
-  const plain = { ...base, install: undefined, reference: '900', skus: base.skus.map((s) => ({ ...s, stock: '5' })) };
+  const plain = {
+    ...base,
+    install: undefined,
+    reference: '900',
+    skus: base.skus.map((s) => ({ ...s, stock: '5' })),
+  };
   assert.deepEqual(preflight(plain), []);
   assert.equal(preflightNotice([plain]), '');
 });
@@ -341,6 +353,53 @@ test('保存资料时到店安装与轮辋直径不会被丢掉', async () => {
       assert.throws(
         () => sanitizeProducts(db, [{ ...saved, skus: [{ ...saved.skus[0], rim: '99英寸' }] }]),
         /轮辋直径不在后台选项里/,
+      );
+    } finally {
+      db.close();
+    }
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test('手填三位小数与公式缓存都原样保留，由问题清单点名（不静默取整）', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'goods-price-'));
+  try {
+    const file = path.join(tmp, 'price.xlsx');
+    await patchedExample(file, { 2: { F5: '39.456', G5: '49.554' } }, v2Example);
+    const [p] = await parseWorkbook(file);
+    assert.equal(p.skus[0].group, '39.456', '手填值原样保留');
+    assert.equal(p.skus[0].single, '49.554', '公式缓存值也原样保留');
+    const issues = problems(p).join(' / ');
+    assert.match(issues, /39\.456/, '问题清单要点出原始值');
+    assert.match(issues, /拼单价/);
+    assert.match(issues, /49\.554/);
+    assert.match(issues, /单买价/);
+    // 本来就合规的两位小数不报。
+    await patchedExample(file, { 2: { F5: '39.45', G5: '49.55' } }, v2Example);
+    const [ok] = await parseWorkbook(file);
+    assert.ok(!problems(ok).some((line) => line.includes('超过两位小数')));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test('普通工作簿留空服务项时也能本机保存', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'goods-save-services-'));
+  try {
+    const [product] = await parseWorkbook(v2Example);
+    // 普通工作簿（不是拼多多采集）把三项服务留空，导入时要能原样保留。
+    const blank = { ...product, services: { sevenDay: '', invoice: '', authenticity: '' } };
+    assert.ok(!blank.source.startsWith('拼多多采集：'), '这条用例故意用普通工作簿');
+    const db = await Store.open(path.join(tmp, 'database'));
+    try {
+      const { sanitizeProducts } = require('../dist-electron/electron/product-service');
+      const [saved] = sanitizeProducts(db, [blank]);
+      assert.deepEqual(saved.services, { sevenDay: '', invoice: '', authenticity: '' });
+      assert.throws(
+        () =>
+          sanitizeProducts(db, [{ ...blank, services: { ...blank.services, invoice: '随便' } }]),
+        /服务与承诺设置不正确/,
       );
     } finally {
       db.close();

@@ -205,8 +205,14 @@ export function problems(p: Product): string[] {
           ['group', '拼单价'],
           ['single', '单买价'],
         ] as const))
-      if (!/^\d+(\.\d{1,2})?$/.test(s[key].trim()) || Number(s[key]) <= 0)
-        out.push(`${row} ${label}须为正金额，最多两位小数`);
+      if (!/^\d+(\.\d{1,2})?$/.test(s[key].trim()) || Number(s[key]) <= 0) {
+        // 手填三位小数、或公式缓存带一长串小数，都原样留在资料里，由这里点名让运营决定。
+        out.push(
+          /^\d+\.\d{3,}$/.test(s[key].trim())
+            ? `${row} ${label}是「${s[key].trim()}」，超过两位小数，后台只收两位；程序不会替你取整，请确认后改（编辑器里有「金额取整」按钮）`
+            : `${row} ${label}须为正金额，最多两位小数`,
+        );
+      }
     if (!taobao && Number(s.group) > Number(s.single)) out.push(`${row} 拼单价不能高于单买价`);
     if (!/^\d+$/.test(s.stock.trim()) || Number(s.stock) > 99999999)
       out.push(`${row} 库存须为非负整数`);

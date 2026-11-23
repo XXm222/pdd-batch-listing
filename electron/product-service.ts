@@ -106,12 +106,16 @@ export function sanitizeProducts(store: Store, input: unknown): Product[] {
       throw new Error('服务与承诺设置不正确');
     const services = { sevenDay: '按平台规则', invoice: '否', authenticity: '否', ...raw.services };
     p.services = { sevenDay: '', invoice: '', authenticity: '' };
+    const serviceLabels: Record<string, string> = {
+      sevenDay: '7天无理由退货',
+      invoice: '正品发票',
+      authenticity: '假一赔十',
+    };
     for (const key of ['sevenDay', 'invoice', 'authenticity'] as const) {
-      if (
-        !['是', '否', '按平台规则'].includes(services[key]) &&
-        !(p.source.startsWith('拼多多采集：') && services[key] === '')
-      )
-        throw new Error('服务与承诺设置不正确');
+      // 留空是合法值（表示「按类目规则取默认」）。以前只允许拼多多采集来源留空，
+      // 于是普通 Excel 里空着这三项能导入却存不进去，保存一步才报错。
+      if (services[key] !== '' && !['是', '否', '按平台规则'].includes(services[key]))
+        throw new Error(`服务与承诺设置不正确：${serviceLabels[key]}`);
       p.services[key] = services[key];
     }
     for (const key of ['main', 'detail'] as const) {
@@ -164,8 +168,7 @@ export function sanitizeProducts(store: Store, input: unknown): Product[] {
         'auctionPoint',
       ] as const) {
         const value = taobao[key] ?? '';
-        if (typeof value !== 'string' || value.length > 200)
-          throw new Error('淘宝发品设置不正确');
+        if (typeof value !== 'string' || value.length > 200) throw new Error('淘宝发品设置不正确');
         listing[key] = value.trim();
       }
       p.taobao = listing as NonNullable<Product['taobao']>;

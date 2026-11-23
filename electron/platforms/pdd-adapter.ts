@@ -29,6 +29,7 @@ import {
   PDD_LOGIN_MATCH,
   type PddAnchor,
 } from './pdd-identity';
+import { templateShopProblem } from './pdd-template-guard';
 import { PDD_DISCOUNT_STATE, type DiscountPageFacts } from './pdd-discount';
 import { BrowserBridge, flatten } from '../browser-bridge';
 import { PddApiDraft, PDD_TEMPLATE_OPTIONS } from './pdd-api-draft';
@@ -558,26 +559,11 @@ export class PddAdapter {
     // 串店守门：浏览器里开着的编辑页属于哪家店，必须和目标店铺一致，
     // 否则会把别家店的模板读回来，甚至读到别家店的服务设置。
     const assertTargetShop = async () => {
-      const bound = typeof shop.mallId === 'number' && typeof shop.userId === 'number';
       const live = readPddAnchor(await this.bridge.eval<unknown>(PDD_ANCHOR_READ, 5000));
-      const running = live && typeof live.mallId === 'number' && typeof live.userId === 'number';
-      // 没绑定编号的店铺只能用后台店名兜底核对（编号是硬证据，店名是软证据）。
-      if (!bound) {
-        const liveName = String(live?.mallName || '').trim();
-        if (liveName && liveName !== shop.name)
-          throw new NeedsUser(
-            `浏览器里打开的店铺是「${liveName}」，不是「${shop.name}」。请先在浏览器切到这家店的商品编辑页，再点一次「读取后台模板」。`,
-          );
-        return;
-      }
-      if (!running)
-        throw new NeedsUser(
-          `读不到当前页面的后台身份，无法确认是不是「${shop.name}」。请确认浏览器已登录这家店并停在商品编辑页，再点一次「读取后台模板」。`,
-        );
-      if (live!.mallId !== shop.mallId || live!.userId !== shop.userId)
-        throw new NeedsUser(
-          `浏览器里打开的是另一家店（后台店铺 ID ${live!.mallId}、账号 ID ${live!.userId}），不是「${shop.name}」（${shop.mallId} / ${shop.userId}）。请先在浏览器切到这家店的商品编辑页，再点一次「读取后台模板」。`,
-        );
+      // 规则见 templateShopProblem：没拿到正向身份凭据就必须停下，
+      // 以前这里对「没绑定编号 + 读不到店名」是放行的，浏览器停在别家店就会读回别家的模板。
+      const problem = templateShopProblem(shop, live);
+      if (problem) throw new NeedsUser(problem);
     };
 
     if (await onEditPage()) {

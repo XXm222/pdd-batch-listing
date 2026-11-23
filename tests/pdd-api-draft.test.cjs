@@ -655,19 +655,36 @@ test('草稿读回：安装类型、模板与每个 SKU 的轮辋直径缺一项
     title: '邓禄普轮胎 205/45R17',
     install: { delivery: 'store', template: 'SIST_real_1' },
     skus: [
-      { spec: '205/45R17', group: '30', single: '40', stock: '1', rim: '17英寸' },
-      { spec: '225/50R18', group: '30', single: '40', stock: '1', rim: '18英寸' },
+      {
+        spec: '205/45R17',
+        options: [{ name: '型号', value: '205/45R17' }],
+        group: '30',
+        single: '40',
+        stock: '1',
+        rim: '17英寸',
+      },
+      {
+        spec: '225/50R18',
+        options: [{ name: '型号', value: '225/50R18' }],
+        group: '30',
+        single: '40',
+        stock: '1',
+        rim: '18英寸',
+      },
     ],
   };
+  const rimOf = (value) => `{"rimDiameter":"${value}"}`;
+  const specOf = (value) => [{ parent_name: '型号', spec_name: value }];
   // 真实草稿详情里没有表单那个 srv_template_id_map，模板落在 goods_srv_templates 的 id 上。
+  // 详情里的 SKU 自带 spec（型号），读回必须按这个组合对上，而不是按出现顺序。
   const good = {
     goods_srv_templates: [
       { type: 8, id: 'SIST_real_1' },
       { type: 10, id: '' },
     ],
     sku: [
-      { sku_srv_templates: '{"rimDiameter":"17英寸"}' },
-      { sku_srv_templates: '{"rimDiameter":"18英寸"}' },
+      { spec: specOf('205/45R17'), sku_srv_templates: rimOf('17英寸') },
+      { spec: specOf('225/50R18'), sku_srv_templates: rimOf('18英寸') },
     ],
   };
   assert.equal(apiInstallMatches(product, good, 'SIST_real_1'), true);
@@ -741,7 +758,7 @@ test('草稿读回：安装类型、模板与每个 SKU 的轮辋直径缺一项
   assert.equal(
     apiInstallMatches(
       product,
-      { ...good, sku: [good.sku[0], { sku_srv_templates: '{}' }] },
+      { ...good, sku: [good.sku[0], { spec: specOf('225/50R18'), sku_srv_templates: '{}' }] },
       'SIST_real_1',
     ),
     false,
@@ -751,6 +768,23 @@ test('草稿读回：安装类型、模板与每个 SKU 的轮辋直径缺一项
     apiInstallMatches(product, { ...good, sku: [good.sku[1], good.sku[0]] }, 'SIST_real_1'),
     true,
     '后台把 SKU 顺序打乱也能对上',
+  );
+  // 只打乱顺序不算错，但把两行的轮辋值互换了必须判失败 —— 之前按排序后的清单比，
+  // 红款 18 / 蓝款 17 这种「张冠李戴」照样过。
+  assert.equal(
+    apiInstallMatches(
+      product,
+      {
+        ...good,
+        sku: [
+          { spec: specOf('205/45R17'), sku_srv_templates: rimOf('18英寸') },
+          { spec: specOf('225/50R18'), sku_srv_templates: rimOf('17英寸') },
+        ],
+      },
+      'SIST_real_1',
+    ),
+    false,
+    '轮辋直径跨 SKU 互换必须失败',
   );
   assert.equal(
     apiInstallMatches({ ...product, install: undefined }, {}, undefined),

@@ -72,14 +72,28 @@ export const apiInstallMatches = (
       return '';
     }
   };
-  const expected = product.skus.map((sku) => apiRim(product, sku));
-  if (expected.some((rim) => !rim)) return false;
-  // 后台返回的 SKU 顺序未必跟我们一致：先按顺序比，顺序不同再按排序后的清单比。
-  if (skus.every((row, index) => readRim(row) === expected[index])) return true;
-  const actual = skus.map(readRim).sort();
-  return (
-    actual.length === expected.length && [...expected].sort().every((rim, i) => actual[i] === rim)
-  );
+  // 轮辋直径必须和「同一个规格组合」一起核：以前按排序后的清单比，只要集合一致就过，
+  // 红款 17 / 蓝款 18 被后台写成红款 18 / 蓝款 17 也照样判成功。
+  // 这里复用 apiSkuMatches 的规格组合键（parent_name + spec_name），SKU 顺序变化不影响。
+  const used = new Set<Row>();
+  for (const sku of product.skus) {
+    const want = apiRim(product, sku);
+    if (!want) return false;
+    const matches = skus.filter(
+      (row) =>
+        Array.isArray(row.spec) &&
+        skuKey(
+          rows(row.spec, '规格选项').map((v) => ({
+            name: String(v.parent_name),
+            value: String(v.spec_name),
+          })),
+        ) === skuKey(sku.options || []),
+    );
+    if (matches.length !== 1 || used.has(matches[0])) return false;
+    used.add(matches[0]);
+    if (readRim(matches[0]) !== want) return false;
+  }
+  return true;
 };
 type Services = { refund: number; invoice: number; authenticity: number };
 // 页面守卫的输入形状：与主进程 LoginEvidence 一致，注入后由 PDD_LOGIN_MATCH 判定。

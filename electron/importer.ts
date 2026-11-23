@@ -43,16 +43,12 @@ function text(value: any): string {
   if (Object.hasOwn(value, 'r')) return text(value.r);
   return '';
 }
-// 运营常用公式算价（如单买价 = 拼单价/0.99），Excel 缓存值会留一长串小数；
-// 后台只收两位小数：本来就合规的报价（39.9 / 49.99）原样保留，
-// 只有公式缓存超过两位时才四舍五入到两位（只丢弃公式的中间精度，不改运营填的数）。
+// 运营常用公式算价（如单买价 = 拼单价/0.99），Excel 缓存值会留一长串小数。
+// 报价一律原样保留：手填 39.456 就是 39.456，公式缓存 49.554 也是 49.554。
+// 后台只收两位小数，所以超出的值由 src/domain.ts 的问题清单点出来（商品 + 规格行 + 列名），
+// 让运营自己决定是改资料还是用编辑器里的「金额取整」按钮，程序不替人改价。
 function money(value: string): string {
-  const raw = String(value ?? '').trim();
-  if (!raw) return '';
-  if (/^\d+(?:\.\d{1,2})?$/.test(raw)) return raw;
-  const number = Number(raw);
-  if (!Number.isFinite(number)) return raw;
-  return String(Math.round(number * 100 + Number.EPSILON) / 100);
+  return String(value ?? '').trim();
 }
 const list = (value: any): any[] =>
   value === undefined || value === null || value === ''

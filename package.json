@@ -14,10 +14,10 @@
     "test": "tsc -p tsconfig.electron.json && node --test tests/*.test.cjs",
     "pack:mac": "pnpm build && electron-builder --mac dir",
     "dist:mac": "pnpm build && electron-builder --mac dmg",
-    "dist:win": "pnpm build && node tools/sync-release-notes.mjs && electron-builder --win nsis --x64",
+    "dist:win": "pnpm build && node scripts/sync-release-notes.mjs && electron-builder --win nsis --x64",
     "format": "prettier --write src electron tests scripts *.json *.yaml *.ts index.html .prettierrc.json .github/workflows/*.yml",
     "format:check": "prettier --check src electron tests scripts *.json *.yaml *.ts index.html .prettierrc.json .github/workflows/*.yml",
-    "notes:sync": "node tools/sync-release-notes.mjs",
+    "notes:sync": "node scripts/sync-release-notes.mjs",
     "updates:prepare": "node scripts/prepare-updates.cjs",
     "updates:publish": "node scripts/publish-updates.cjs"
   },
