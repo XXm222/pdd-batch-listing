@@ -1,7 +1,16 @@
 import type { BrowserBridge } from '../browser-bridge';
 import { ExecutionError } from '../execution';
 import { ShopLoginError } from './shop-login';
-import { matchesPddIdentity, completePddIdentities, isPddLoginConfirmed } from './pdd-identity';
+import {
+  matchesPddIdentity,
+  matchesPddLogin,
+  pddAnchorVerdict,
+  readPddAnchor,
+  PDD_ANCHOR_READ,
+  completePddIdentities,
+  isPddLoginConfirmed,
+} from './pdd-identity';
+import type { PddAnchor } from './pdd-identity';
 import type { Shop, ShopLoginEvent } from '../../src/types';
 
 export { ShopLoginError } from './shop-login';
@@ -26,11 +35,14 @@ type LoginState = {
   challenge: boolean;
   rejected: boolean;
   structure?: LoginStructure;
+  anchor?: PddAnchor;
 };
 // Return classifications only. Passwords, cookies and page text never enter progress records.
 export const LOGIN_STATE = `(() => {
   if(location.origin!=='${ORIGIN}')return {trusted:false};
   const visible=e=>!!e&&e.getClientRects().length>0&&getComputedStyle(e).visibility!=='hidden';
+  // 结构化身份：mall_id 与用户 id。读不到就是 undefined，绝不猜。
+  const anchor=${PDD_ANCHOR_READ};
   const header=document.querySelector('header'),banner=document.querySelector('[role=banner]');
   const names=(header?.innerText||banner?.innerText||'').split('\\n').map(s=>s.trim()).filter(Boolean);
   const logoutTextPresent=names.includes('退出当前账号');
@@ -40,44 +52,52 @@ export const LOGIN_STATE = `(() => {
   const loginPage=/^\\/login(?:\\/|$)/.test(location.pathname),form=visible(document.querySelector('#usernameId'))&&visible(document.querySelector('#passwordId'));
   const rejected=/账号或密码错误|账户或密码错误|用户名或密码错误|密码不正确|密码错误|账号不存在|账户不存在|账号已被锁定|账号被锁定/.test(text);
   const challenge=/请拖动滑块|拖动滑块完成|滑动完成验证|点击完成验证|请完成安全验证|请完成验证|请输入短信验证码/.test(text)||[...document.querySelectorAll('iframe')].some(e=>visible(e)&&/captcha|verify|验证码|安全验证/i.test(e.title+' '+e.src));
-  return {trusted:true,names,signedIn:(logoutDomPresent||logoutTextPresent)&&!loginPage&&!form&&!rejected&&!challenge,
+  return {trusted:true,anchor,names,signedIn:(logoutDomPresent||logoutTextPresent)&&!loginPage&&!form&&!rejected&&!challenge,
     structure:{headerPresent:!!header,bannerPresent:!!banner,logoutTextPresent,logoutDomPresent,logoutVisible,maskedTextPresent:names.some(s=>s.includes('*')),nameCount:names.length},
     loginPage,form,rejected,challenge};
 })()`;
-const SAME_SHOP = (s: LoginState, shop: Shop) =>
-  isPddLoginConfirmed(s, shop) && matchesPddIdentity(s.names, shop);
+const SAME_SHOP = (s: LoginState, shop: Shop) => matchesPddLogin(s, shop);
 const asciiLower = (value: string) => value.replace(/[A-Z]/g, (c) => c.toLowerCase());
 const caseOnly = (names: string[], value: string) =>
   names.some((name) => name !== value && asciiLower(name) === asciiLower(value));
 // Only a complete shop + subaccount pair establishes an unambiguous other identity.
 // A masked/incomplete identity must never trigger repeated logout and login attempts.
-const completeIdentities = (s: LoginState) => completePddIdentities(s.names);
+const completeIdentities = (s: LoginState, shop: Shop) => completePddIdentities(s.names, shop);
+// The header appends the subaccount's real name, so compare the bare account and
+// the displayed line, never a substring.
+const accountDiffers = (identity: { account: string; display: string }, account: string) =>
+  identity.account !== account &&
+  identity.display !== account &&
+  asciiLower(identity.account) !== asciiLower(account) &&
+  asciiLower(identity.display) !== asciiLower(account);
 const canSwitchAccount = (s: LoginState, shop: Shop) => {
-  const identities = completeIdentities(s);
+  // 绑定的整数证明当前登录是另一家店/另一个子账号，这是完整证据，可以切。
+  if (pddAnchorVerdict(s.anchor, shop) === 'mismatch') return true;
+  const identities = completeIdentities(s, shop);
   if (identities.length !== 1) return false;
   if (asciiLower(identities[0].shop) === asciiLower(shop.name) && shop.account.includes(':'))
-    return asciiLower(identities[0].account) !== asciiLower(shop.account);
+    return accountDiffers(identities[0], shop.account);
   if (caseOnly(s.names, shop.name) || caseOnly(s.names, shop.account)) return false;
   return (
     identities[0].shop !== shop.name ||
-    (shop.account.includes(':') && identities[0].account !== shop.account)
+    (shop.account.includes(':') && accountDiffers(identities[0], shop.account))
   );
 };
 const identityProblem = (s: LoginState, shop: Shop) => {
   if (caseOnly(s.names, shop.name))
     return `后台店铺名称与保存的“${shop.name}”仅大小写不同，请到店铺管理按后台名称修改后继续`;
+  const identities = completeIdentities(s, shop);
   if (!s.names.includes(shop.name))
-    return completeIdentities(s).length
+    return identities.length
       ? `后台店铺名称与保存的“${shop.name}”不一致，请核对店铺管理中的名称和当前后台店铺`
       : '后台已登录，但店铺与账号信息未完整读取，无法核对所选店铺；请检查后台账号区';
   if (caseOnly(s.names, shop.account))
     return '后台店铺名称已匹配，但登录账号与保存信息仅大小写不同，请到店铺管理按后台账号修改后继续';
-  if (
-    s.names.some((name) => name.includes('*')) &&
-    !completeIdentities(s).some((identity) => identity.shop === shop.name)
-  )
+  // The main account before the colon need not equal the shop name, so a single
+  // complete pair is the whole available evidence here.
+  if (s.names.some((name) => name.includes('*')) && !identities.length)
     return '后台店铺名称已匹配，但登录账号被隐藏，无法确认所选子账号；已保留当前登录，请核对店铺登录信息';
-  if (completeIdentities(s).some((identity) => identity.shop === shop.name))
+  if (identities.length === 1)
     return '后台店铺名称已匹配，但登录账号与保存信息不一致，请核对店铺登录信息';
   return '后台店铺名称已匹配，但未读取到完整登录账号，无法确认所选子账号；已保留当前登录，请核对后台账号区';
 };
@@ -88,6 +108,8 @@ export const shopIdentityMessage = (shop: Pick<Shop, 'name' | 'account'>) =>
 
 export class PddLogin {
   private lastState?: LoginState;
+  /** 同一次「核对通过」状态里同时带齐的后台编号；没带齐就留空，不拿旧值顶上。 */
+  private verifiedAnchor?: PddAnchor;
   constructor(
     private bridge: Bridge,
     private decrypt: (shop: Shop) => Promise<string>,
@@ -120,7 +142,17 @@ export class PddLogin {
   }
   private async state() {
     this.guard();
-    return (this.lastState = await this.bridge.eval<LoginState>(LOGIN_STATE, 5000));
+    const raw = await this.bridge.eval<LoginState & { anchor?: unknown }>(LOGIN_STATE, 5000);
+    // 只记录「这一次读到」的结构化身份；切店过程中上一家店的编号不能留到下一家店。
+    const anchor = readPddAnchor(raw?.anchor);
+    return (this.lastState = { ...raw, anchor });
+  }
+  /**
+   * 本次核对**通过的那一刻**读到的完整后台身份（mall_id + 用户 id）。
+   * 只在同一次状态既通过核对、又带齐两个编号时才写入，切店途中不会残留上一家店的值。
+   */
+  get anchor(): PddAnchor | undefined {
+    return this.verifiedAnchor;
   }
   private async trusted() {
     if (!(await this.state()).trusted)
@@ -152,13 +184,30 @@ export class PddLogin {
   }
   private async verify(shop: Shop) {
     const result = await this.poll(
-      (s) => s.trusted && (isPddLoginConfirmed(s, shop) || s.rejected || s.challenge),
+      (s) =>
+        s.trusted &&
+        (isPddLoginConfirmed(s, shop) ||
+          pddAnchorVerdict(s.anchor, shop) === 'mismatch' ||
+          s.rejected ||
+          s.challenge),
       '登录尚未确认，请查看已连接的浏览器后核对登录结果',
       20000,
     );
+    // 绑定的整数对不上就是另一家店或另一个子账号，此时页面文字再怎么像也不算数。
+    if (pddAnchorVerdict(result.anchor, shop) === 'mismatch')
+      throw new ShopLoginError(
+        'failed',
+        '后台登录的店铺或子账号与店铺管理中保存的后台绑定不一致（店铺 ID 或账号 ID 不同），请核对后重新登录',
+        result.structure,
+      );
     if (isPddLoginConfirmed(result, shop)) {
       if (!SAME_SHOP(result, shop))
         throw new ShopLoginError('failed', identityProblem(result, shop), result.structure);
+      // 只有「这一次通过核对」的状态里同时带齐两个编号，才允许回填店铺绑定；
+      // 少一个就留空，主进程不会写入半套身份，也不会沿用上一家店的值。
+      const anchor = result.anchor;
+      if (anchor && typeof anchor.mallId === 'number' && typeof anchor.userId === 'number')
+        this.verifiedAnchor = { mallId: anchor.mallId, userId: anchor.userId };
       return;
     }
     if (result.rejected)
@@ -173,6 +222,7 @@ export class PddLogin {
   }
   async run(shop: Shop, mode: 'reuse' | 'relogin' | 'check' = 'reuse') {
     this.lastState = undefined;
+    this.verifiedAnchor = undefined;
     if (mode === 'check') {
       await this.step(shop.account.includes(':') ? '核对店铺与登录账号' : '核对后台店铺', () =>
         this.verify(shop),
@@ -183,11 +233,17 @@ export class PddLogin {
       this.poll(
         (s) =>
           s.trusted &&
-          (isPddLoginConfirmed(s, shop) || s.loginPage || s.form || s.challenge || s.rejected),
+          (isPddLoginConfirmed(s, shop) ||
+            pddAnchorVerdict(s.anchor, shop) === 'mismatch' ||
+            s.loginPage ||
+            s.form ||
+            s.challenge ||
+            s.rejected),
         '后台登录页面未加载，请检查已连接的浏览器',
       ),
     );
-    const confirmed = isPddLoginConfirmed(initial, shop);
+    const confirmed =
+      isPddLoginConfirmed(initial, shop) || pddAnchorVerdict(initial.anchor, shop) === 'mismatch';
     if (mode === 'reuse' && SAME_SHOP(initial, shop)) {
       await this.step(shop.account.includes(':') ? '核对店铺与登录账号' : '核对后台店铺', () =>
         this.verify(shop),

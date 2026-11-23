@@ -96,8 +96,39 @@ export class Store {
       ),
     );
   }
-  saveAssets(assets: Asset[]) {
-    this.transaction(() => {
+  /**
+   * 写入后台身份绑定。绑定只是核对用的元数据：不动账号，也不改 `updatedAt`，
+   * 免得把正在采集或正在执行的店铺当成「资料被别人改过」。
+   */
+  bindShopIdentity(id: string, anchor: { mallId?: number; userId?: number }): Shop | undefined {
+    const shop = this.all<Shop>('shops').find((s) => s.id === id);
+    if (!shop || !anchor.mallId || !anchor.userId) return shop;
+    if (shop.mallId === anchor.mallId && shop.userId === anchor.userId) return shop;
+    const next: Shop = {
+      ...shop,
+      mallId: anchor.mallId,
+      userId: anchor.userId,
+      boundAt: new Date().toISOString(),
+    };
+    this.transaction(() => this.db.run('UPDATE shops SET json=? WHERE id=?', [JSON.stringify(next), id]));
+    return next;
+  }
+  /** 记住这家店的到店安装模板：只动这一个字段，账号与绑定都不碰。 */
+  bindInstallTemplate(
+    shopId: string,
+    template: { id: string; label: string },
+  ): Shop | undefined {
+    const shop = this.all<Shop>('shops').find((s) => s.id === shopId);
+    if (!shop) return undefined;
+    if (shop.installTemplate?.id === template.id && shop.installTemplate?.label === template.label)
+      return shop;
+    const next: Shop = { ...shop, installTemplate: { id: template.id, label: template.label } };
+    this.transaction(() =>
+      this.db.run('UPDATE shops SET json=? WHERE id=?', [JSON.stringify(next), shopId]),
+    );
+    return next;
+  }
+  saveAssets(assets: Asset[]) {    this.transaction(() => {
       for (const a of assets)
         this.db.run('INSERT OR IGNORE INTO assets(id,json) VALUES (?,?)', [
           a.id,

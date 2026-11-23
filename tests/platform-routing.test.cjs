@@ -187,3 +187,46 @@ test('淘宝连接信任登录页与工作台两个来源，其他来源一律�
     /HTTPS/,
   );
 });
+
+test('商品自己填的模板优先，留空才用店铺记住的默认模板', async (t) => {
+  const pdd = await fixture(t, 'pdd');
+  const templateId = 'SIST_418714932725772662';
+  pdd.store.saveShop(
+    { ...pdd.shop, installTemplate: { id: templateId, label: '到店模版1' } },
+    'isolated-test-secret',
+  );
+  const withName = {
+    ...pdd.products[0],
+    code: 'PLATFORM-INSTALL',
+    install: { delivery: 'store', template: '到店模版1' },
+    skus: [{ spec: '默认规格', group: '30', single: '40', stock: '10', rim: '17英寸' }],
+  };
+  assert.deepEqual(problems(withName), []);
+  pdd.store.saveProducts([withName]);
+  const ids = prepareTasks(pdd.store, { shopId: pdd.shop.id, productIds: [withName.id] });
+  // 商品明确填了「到店模版1」：先原样保留，执行阶段再换成后台 ID。
+  assert.equal(readTask(pdd.store, ids[0]).productSnapshot.install.template, '到店模版1');
+
+  const blank = {
+    ...withName,
+    code: 'PLATFORM-INSTALL-2',
+    install: { delivery: 'store', template: '' },
+  };
+  assert.deepEqual(problems(blank), []);
+  pdd.store.saveProducts([blank]);
+  const blankIds = prepareTasks(pdd.store, { shopId: pdd.shop.id, productIds: [blank.id] });
+  assert.equal(readTask(pdd.store, blankIds[0]).productSnapshot.install.template, templateId);
+
+  const explicit = {
+    ...withName,
+    code: 'PLATFORM-INSTALL-3',
+    install: { delivery: 'store', template: 'SIST_111111111111111111' },
+  };
+  assert.deepEqual(problems(explicit), []);
+  pdd.store.saveProducts([explicit]);
+  const taskIds = prepareTasks(pdd.store, { shopId: pdd.shop.id, productIds: [explicit.id] });
+  assert.equal(
+    readTask(pdd.store, taskIds[0]).productSnapshot.install.template,
+    'SIST_111111111111111111',
+  );
+});

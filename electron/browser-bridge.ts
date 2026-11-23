@@ -130,6 +130,19 @@ export class BrowserBridge {
       }),
     );
   }
+  /** 把桥接绑到已经打开的目标页上（例如运营手动切到的商品编辑页）；没有这样的标签页就返回 false。 */
+  async focusTab(urlPrefix: string): Promise<boolean> {
+    for (const args of [{ url: urlPrefix, active: true }, { url: urlPrefix }]) {
+      try {
+        this.checkTab(await this.call<TabResult>('find_tab', args));
+        return true;
+      } catch (error) {
+        if (closedSessionTab(error)) break;
+        if (!missingTab(error)) throw error;
+      }
+    }
+    return false;
+  }
   private checkTab(tab: TabResult) {
     let trusted = false;
     try {

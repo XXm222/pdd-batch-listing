@@ -5,6 +5,15 @@ import type { PlatformAdapter } from '../execution';
 import type { PageFacts, PageRecovery, RecoveryResult } from '../agent-service';
 import type { Shop, ShopLoginEvent, Task } from '../../src/types';
 
+/** 核对成功后带回的店铺后台身份；拼多多提供编号，淘宝暂不提供。 */
+export type VerifiedIdentity = {
+  mallId?: number;
+  userId?: number;
+  username?: string;
+  nickname?: string;
+  mallName?: string;
+};
+
 /**
  * 一个平台的运行时：执行器、登录核对、可选的页面诊断与恢复。
  * 平台之间互不共享选择器或页面脚本。
@@ -17,9 +26,11 @@ export type PlatformRuntime = {
     shop: Shop,
     mode: 'relogin' | 'check',
     onEvent: (event: ShopLoginEvent) => void,
-  ): Promise<void>;
+  ): Promise<VerifiedIdentity | undefined>;
   inspectDiagnosis(task: Task, shop: Shop): Promise<PageFacts>;
   recoverPage(task: Task, shop: Shop, action: PageRecovery): Promise<RecoveryResult>;
+  /** 读后台可选的到店安装模板；给了 editUrl 就先让桥接打开那个编辑页。 */
+  installTemplates?(shop: Shop, editUrls?: string | string[]): Promise<{ label: string; value: string }[]>;
 };
 
 export class PlatformRegistry {
@@ -35,12 +46,16 @@ export class PlatformRegistry {
         verifyLogin: (shop, mode, onEvent) => pdd.verifyLogin(shop, mode, onEvent),
         inspectDiagnosis: (task, shop) => pdd.inspectDiagnosis(task, shop),
         recoverPage: (task, shop, action) => pdd.recoverPage(task, shop, action),
+        installTemplates: (shop, editUrls) => pdd.installTemplates(shop, editUrls),
       },
       taobao: {
         id: 'taobao',
         portal: platformMeta('taobao').portal,
         adapter: taobao,
-        verifyLogin: (shop, mode, onEvent) => taobao.verifyLogin(shop, mode, onEvent),
+        verifyLogin: async (shop, mode, onEvent) => {
+          await taobao.verifyLogin(shop, mode, onEvent);
+          return undefined;
+        },
         inspectDiagnosis: (task, shop) => taobao.inspectDiagnosis(task, shop),
         recoverPage: (task, shop, action) => taobao.recoverPage(task, shop, action),
       },

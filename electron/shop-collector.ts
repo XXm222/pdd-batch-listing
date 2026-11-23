@@ -15,6 +15,7 @@ import {
 import { exportProductWorkbook } from './workbook-export';
 import { saveImage } from './importer';
 import { newProduct } from '../src/domain';
+import { auditImages } from '../src/product-checks';
 import { normalizePlatform } from '../src/platforms';
 import type { CollectionState, Product, Shop, ShopGoods } from '../src/types';
 
@@ -817,6 +818,9 @@ export class ShopCollector {
       else
         for (const [i, url] of facts.skuImages.entries())
           if (url) p.skus[i].image = await attach(url, `sku-${i + 1}.png`);
+      const imageIssues = auditImages(p);
+      if (imageIssues.length)
+        throw Error(`图片未能完整归属本商品，未导出：${imageIssues.slice(0, 3).join('；')}`);
       this.guard();
       return { bytes: await exportProductWorkbook(p, this.template, temporary), warnings };
     } finally {

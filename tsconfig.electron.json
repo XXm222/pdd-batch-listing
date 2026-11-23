@@ -15,6 +15,9 @@
     "src/types.ts",
     "src/domain.ts",
     "src/platforms.ts",
+    "src/shop-account.ts",
+    "src/pdd-rim.ts",
+    "src/product-checks.ts",
     "src/task-progress.ts",
     "src/product-list.ts",
     "src/workspace-state.ts"

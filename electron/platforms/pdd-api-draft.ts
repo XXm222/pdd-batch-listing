@@ -4,12 +4,117 @@ import type { BrowserBridge } from '../browser-bridge';
 import { ExecutionError, type ExecutionContext } from '../execution';
 import { validateLocalImageFiles } from '../importer';
 import { isRecord, pddCategoryLeaf } from './pdd-page-scripts';
+import { PDD_ANCHOR_READ, PDD_LOGIN_MATCH } from './pdd-identity';
 import type { Product, Shop, Task, BackendCheck } from '../../src/types';
+import { rimDiameterLabel } from '../../src/pdd-rim';
 
 type Row = Record<string, unknown>;
 type Category = { id: number; ids: number[]; cats: { cat_id: number; cat_name: string }[] };
 type Upload = { url: string; width: number; height: number };
+/**
+ * 每个 SKU 的轮辋直径：导入时已经算好就直接用；
+ * 没有（老资料、或表格里没填）就按规格选项与标题现场推一遍，保证永远能自动填。
+ */
+export const apiRim = (product: Product, sku: Product['skus'][number]): string => {
+  if (!product.install) return '';
+  if (sku.rim) return sku.rim;
+  return rimDiameterLabel(...(sku.options || []).map((o) => o.value), product.title) || '';
+};
+/**
+ * 读回时逐项核对安装设置：安装类型对应的模板 ID 必须写进去，
+ * 且每个 SKU 的轮辋直径都要在 `sku_srv_templates` 里出现；
+ * 以前只看售后承诺，安装整块丢了也会判定成功。
+ */
+export const apiInstallMatches = (
+  product: Product,
+  detail: Row,
+  resolvedTemplate?: string,
+): boolean => {
+  if (!product.install) return true;
+  const want = String(resolvedTemplate || '').trim();
+  const attached = (
+    Array.isArray(detail.goods_srv_templates) ? (detail.goods_srv_templates as Row[]) : []
+  )
+    .map((row) => String(row?.id ?? '').trim())
+    .filter(Boolean);
+  // 草稿详情里没有表单那个 srv_template_id_map，真正的落点是 goods_srv_templates 的 id；
+  // 旧字段只在个别返回里出现，读到就一起认，读不到不据此判失败。
+  const map = (detail.srv_template_id_map || {}) as Record<string, unknown>;
+  const key = apiInstallType(product.install.delivery);
+  const mapped = String(map[key] ?? '').trim();
+  // 模板挂在哪个槽位（配送到店 type 8 / 配送到家 type 10）必须和资料选的一致：
+  // 只比 id 集合的话，运营把「配送到店」选成「配送到家」照样过，后台实际挂到了另一类模板。
+  const slot = product.install.delivery === 'home' ? 10 : 8;
+  const typed = (
+    Array.isArray(detail.goods_srv_templates) ? (detail.goods_srv_templates as Row[]) : []
+  )
+    .filter((row) => typeof row?.type === 'number')
+    .map((row) => ({ type: Number(row.type), id: String(row.id ?? '').trim() }));
+  if (typed.length) {
+    const here = String(typed.find((row) => row.type === slot)?.id || '');
+    const other = String(typed.find((row) => row.type !== slot)?.id || '');
+    if (!here) return false;
+    if (other) return false;
+    if (want && here !== want) return false;
+  }
+  const saved = [...attached, mapped].filter(Boolean);
+  if (!saved.length) return false;
+  if (want && !saved.includes(want)) return false;
+  const skus = Array.isArray(detail.sku) ? (detail.sku as Row[]) : [];
+  if (skus.length !== product.skus.length) return false;
+  const readRim = (row: Row | undefined) => {
+    const raw = row?.sku_srv_templates;
+    if (!raw) return '';
+    if (typeof raw === 'object') return String((raw as Row).rimDiameter ?? '').trim();
+    try {
+      return String((JSON.parse(String(raw)) as Row).rimDiameter ?? '').trim();
+    } catch {
+      return '';
+    }
+  };
+  // 轮辋直径必须和「同一个规格组合」一起核：以前按排序后的清单比，只要集合一致就过，
+  // 红款 17 / 蓝款 18 被后台写成红款 18 / 蓝款 17 也照样判成功。
+  // 这里复用 apiSkuMatches 的规格组合键（parent_name + spec_name），SKU 顺序变化不影响。
+  const used = new Set<Row>();
+  for (const sku of product.skus) {
+    const want = apiRim(product, sku);
+    if (!want) return false;
+    const matches = skus.filter(
+      (row) =>
+        Array.isArray(row.spec) &&
+        skuKey(
+          rows(row.spec, '规格选项').map((v) => ({
+            name: String(v.parent_name),
+            value: String(v.spec_name),
+          })),
+        ) === skuKey(sku.options || []),
+    );
+    if (matches.length !== 1 || used.has(matches[0])) return false;
+    used.add(matches[0]);
+    if (readRim(matches[0]) !== want) return false;
+  }
+  return true;
+};
 type Services = { refund: number; invoice: number; authenticity: number };
+// 页面守卫的输入形状：与主进程 LoginEvidence 一致，注入后由 PDD_LOGIN_MATCH 判定。
+type GuardState = {
+  trusted: boolean;
+  names: string[];
+  loginPage: boolean;
+  form: boolean;
+  rejected: boolean;
+  challenge: boolean;
+  structure?: { logoutDomPresent?: boolean; logoutTextPresent?: boolean };
+  anchor?: unknown;
+};
+type GuardShop = { name: string; account: string; mallId?: number; userId?: number };
+// 带绑定的整数进页面，页面守卫就能先比编号、再退回文字。
+const guardShop = (shop: Shop): GuardShop => ({
+  name: shop.name,
+  account: shop.account,
+  mallId: shop.mallId,
+  userId: shop.userId,
+});
 const CREATE = '/glide/v2/mms/edit/commit/create_new';
 const DETAIL = '/glide/v2/mms/query/commit/detail';
 const SAVE = '/glide/mms/goodsCommit/action/edit';
@@ -39,10 +144,359 @@ export function apiCents(value: string): number {
   if (!Number.isSafeInteger(n)) throw new Error('价格超出可表示范围');
   return n;
 }
+// 类目是否提供正品发票：轮胎等类目的服务与承诺只有发货时间、7天无理由与假一赔十。
+export function apiInvoice(
+  wants: boolean,
+  rules: Record<string, unknown>,
+): { invoice: 0 | 1; offers: boolean } {
+  const offers = [
+    rules.authentic_invoice,
+    rules.is_electronic_invoice,
+    rules.is_paper_invoice,
+    rules.allow_invoice_sub_type,
+    rules.must_set_invoice,
+  ].some((value) => value === true || (Array.isArray(value) && value.length > 0));
+  return { invoice: wants && offers ? 1 : 0, offers };
+}
+// 到店安装：表单 `service.srv_template_id_map` 的键就是安装类型编号。
+// 配送到店 = 2（已用真实草稿验证过），配送到家的编号后台未在提交里出现过，
+// 先按 3 填；后台校验不通过时会明确报出来，不会静默写错。
+// 到店安装模板必须是后台模板 ID。运营只知道名字（「到店模版1」），
+// 所以允许填名字，由下面这段页面脚本去下拉里把 ID 挖出来：
+// 下拉项本身不带 data-value，真实 value 只活在 React 组件的 props.option 里。
+export const PDD_TEMPLATE_LOOKUP = (name: string) =>
+  (async () => {
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const waitFor = async (probe: () => boolean, timeout = 3000) => {
+      const until = Date.now() + timeout;
+      while (Date.now() < until) {
+        if (probe()) return true;
+        await sleep(150);
+      }
+      return probe();
+    };
+    // 后台的开关与复选框只认真实指针事件序列，单个 .click() 在部分组件上无效。
+    const press = async (node: Element | null) => {
+      if (!node) return false;
+      const host = node as unknown as HTMLElement;
+      if (typeof host.scrollIntoView === 'function') host.scrollIntoView({ block: 'center' });
+      if (typeof host.dispatchEvent === 'function' && typeof MouseEvent === 'function') {
+        const rect =
+          typeof host.getBoundingClientRect === 'function' ? host.getBoundingClientRect() : null;
+        const view = typeof window !== 'undefined' ? window : undefined;
+        const init = {
+          bubbles: true,
+          cancelable: true,
+          view,
+          clientX: rect ? rect.x + rect.width / 2 : 0,
+          clientY: rect ? rect.y + rect.height / 2 : 0,
+        };
+        for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+          host.dispatchEvent(new MouseEvent(type, init));
+        }
+        return true;
+      }
+      if (typeof host.click === 'function') {
+        host.click();
+        return true;
+      }
+      return false;
+    };
+    const norm = (text: unknown) =>
+      String(text ?? '')
+        .replace(/模板/g, '模版')
+        .replace(/[\s（）()]/g, '')
+        .toLowerCase();
+    const want = norm(name);
+    const textOf = (node: Element) => (node.textContent || '').replace(/\s/g, '');
+    const findBox = () =>
+      document.getElementById('service.srv_template_id_map.2') ||
+      document.getElementById('service.srv_template_id_map.3');
+    // 「到店安装」默认收在「更多服务 → 展开修改」里，没勾选就不会渲染模板下拉。
+    const installCheckbox = () => {
+      for (const label of [...document.querySelectorAll('label')]) {
+        const text = textOf(label);
+        if (!text.includes('到店安装') || text.includes('到店安装类型')) continue;
+        const input = label.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+        if (input) return input;
+      }
+      return null;
+    };
+    // 「到店安装」默认收在「更多服务 → 展开修改」里。真实页面里「更多服务」是
+    // .mui-form-group-label，展开开关是同一组里的 .bottom-switch；页面上有多处
+    // 「展开修改」（商详装修等），所以必须先锁定分组再点，否则点半天也展不开。
+    const expandServicePanel = async () => {
+      const group = [...document.querySelectorAll('.mui-form-group-label')].find((node) =>
+        textOf(node).includes('更多服务'),
+      );
+      let shell: Element | null = group ?? null;
+      for (let depth = 0; depth < 4 && shell; depth += 1) {
+        const toggle = (
+          typeof shell.querySelector === 'function' ? shell.querySelector('.bottom-switch') : null
+        ) as HTMLElement | null;
+        if (toggle && typeof toggle.click === 'function') {
+          await press(toggle);
+          await waitFor(() => Boolean(findBox()) || Boolean(installCheckbox()), 3000);
+          return true;
+        }
+        shell = shell.parentElement;
+      }
+      const fallback = [...document.querySelectorAll('button,a,span,div')].find(
+        (node) => textOf(node) === '展开修改',
+      ) as HTMLElement | undefined;
+      if (fallback && typeof fallback.click === 'function') {
+        await press(fallback);
+        await waitFor(() => Boolean(findBox()) || Boolean(installCheckbox()), 3000);
+        return true;
+      }
+      return false;
+    };
+    let box = findBox();
+    if (!box) {
+      await expandServicePanel();
+      box = findBox();
+    }
+    let checkboxSeen = false;
+    if (!box) {
+      let input = installCheckbox();
+      if (!input) {
+        // 有的页面第一次展开只露出一层，再点一次才出现「到店安装」。
+        await expandServicePanel();
+        await waitFor(() => Boolean(installCheckbox()), 2000);
+        input = installCheckbox();
+      }
+      if (input) {
+        checkboxSeen = true;
+        if (!input.checked) {
+          const host = input.closest('label') || input;
+          await press(host as HTMLElement);
+          await waitFor(() => Boolean(findBox()), 3000);
+        }
+        box = findBox();
+      }
+    }
+    const header =
+      (box && box.querySelector('[data-testid="beast-core-select-header"]')) ||
+      [...document.querySelectorAll('[data-testid="beast-core-select-header"]')].find((node) =>
+        (node as HTMLElement).parentElement?.parentElement?.innerText.includes('配送到店模板'),
+      ) ||
+      null;
+    if (!header)
+      return {
+        ok: false as const,
+        reason: checkboxSeen
+          ? '已勾选「到店安装」，但模板下拉还没出现（页面可能仍在加载），请稍后重试或在后台手动选一次模板'
+          : '页面里找不到「到店安装」勾选项：该商品类目可能不支持到店安装，请核对后台「服务与承诺」区域',
+      };
+    await press(header as HTMLElement);
+    await waitFor(() => document.querySelectorAll('li[role="option"]').length > 0, 2000);
+    const seen = new Map<string, string>();
+    const items = [...document.querySelectorAll('li[role="option"]')];
+    const pick = (li: Element) => {
+      let node = (li as unknown as Record<string, unknown>)[
+        Object.keys(li).find((k) => k.startsWith('__reactInternalInstance')) || ''
+      ] as Record<string, unknown> | undefined;
+      for (let depth = 0; node && depth < 8; depth += 1) {
+        const props = node.memoizedProps as Record<string, unknown> | undefined;
+        const option = props?.option as { label?: string; value?: string } | undefined;
+        if (option?.label && option.value)
+          return { label: option.label, value: String(option.value) };
+        node = node.return as typeof node;
+      }
+      return undefined;
+    };
+    for (const li of items) {
+      const found = pick(li);
+      if (found) seen.set(found.value, found.label);
+      else if (li.textContent?.trim()) seen.set('', li.textContent.trim());
+    }
+    const options = [...seen.entries()].map(([value, label]) => ({ value, label }));
+    const hit = options.find((option) => option.value && norm(option.label) === want);
+    if (!hit) {
+      (header as HTMLElement).click();
+      return { ok: false as const, options, reason: '后台下拉里没有这个模板' };
+    }
+    const target = items.find((li) => pick(li)?.value === hit.value);
+    if (target) {
+      (target as HTMLElement).click();
+      await sleep(300);
+    }
+    return { ok: true as const, id: hit.value, label: hit.label, options };
+  })();
+// 只读下拉里有哪些模板，供界面做成下拉框：不改任何值，读完把下拉点回去。
+export const PDD_TEMPLATE_OPTIONS = () =>
+  (async () => {
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const waitFor = async (probe: () => boolean, timeout = 3000) => {
+      const until = Date.now() + timeout;
+      while (Date.now() < until) {
+        if (probe()) return true;
+        await sleep(150);
+      }
+      return probe();
+    };
+    // 后台的开关与复选框只认真实指针事件序列，单个 .click() 在部分组件上无效。
+    const press = async (node: Element | null) => {
+      if (!node) return false;
+      const host = node as unknown as HTMLElement;
+      if (typeof host.scrollIntoView === 'function') host.scrollIntoView({ block: 'center' });
+      if (typeof host.dispatchEvent === 'function' && typeof MouseEvent === 'function') {
+        const rect =
+          typeof host.getBoundingClientRect === 'function' ? host.getBoundingClientRect() : null;
+        const view = typeof window !== 'undefined' ? window : undefined;
+        const init = {
+          bubbles: true,
+          cancelable: true,
+          view,
+          clientX: rect ? rect.x + rect.width / 2 : 0,
+          clientY: rect ? rect.y + rect.height / 2 : 0,
+        };
+        for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+          host.dispatchEvent(new MouseEvent(type, init));
+        }
+        return true;
+      }
+      if (typeof host.click === 'function') {
+        host.click();
+        return true;
+      }
+      return false;
+    };
+    const textOf = (node: Element) => (node.textContent || '').replace(/\s/g, '');
+    const findBox = () =>
+      document.getElementById('service.srv_template_id_map.2') ||
+      document.getElementById('service.srv_template_id_map.3');
+    const installCheckbox = () => {
+      for (const label of [...document.querySelectorAll('label')]) {
+        const text = textOf(label);
+        if (!text.includes('到店安装') || text.includes('到店安装类型')) continue;
+        const input = label.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+        if (input) return input;
+      }
+      return null;
+    };
+    const expandServices = async () => {
+      const group = [...document.querySelectorAll('.mui-form-group-label')].find((node) =>
+        textOf(node).includes('更多服务'),
+      );
+      let shell: Element | null = group ?? null;
+      for (let depth = 0; depth < 4 && shell; depth += 1) {
+        const toggle = (
+          typeof shell.querySelector === 'function' ? shell.querySelector('.bottom-switch') : null
+        ) as HTMLElement | null;
+        if (toggle && typeof toggle.click === 'function') {
+          await press(toggle);
+          await waitFor(() => Boolean(findBox()) || Boolean(installCheckbox()), 3000);
+          return true;
+        }
+        shell = shell.parentElement;
+      }
+      return false;
+    };
+    // 只读：不替运营勾「到店安装」（勾选等于替它同意服务条款，也会把编辑页改成脏状态）。
+    let box = findBox();
+    if (!box) {
+      await expandServices();
+      box = findBox();
+    }
+    if (!box) {
+      let input = installCheckbox();
+      if (!input) {
+        await expandServices();
+        await waitFor(() => Boolean(installCheckbox()), 2000);
+        input = installCheckbox();
+      }
+      return {
+        ok: false as const,
+        options: [],
+        reason: input
+          ? '页面还没勾选「到店安装」，这里只读、不会替你勾选；请先在后台勾选并保存，再读取模板'
+          : '页面里找不到「到店安装」勾选项，请先确认停在目标店铺的商品编辑页',
+      };
+    }
+    const header =
+      (box && box.querySelector('[data-testid="beast-core-select-header"]')) ||
+      [...document.querySelectorAll('[data-testid="beast-core-select-header"]')].find((node) =>
+        (node as HTMLElement).parentElement?.parentElement?.innerText.includes('配送到店模板'),
+      ) ||
+      null;
+    if (!header)
+      return { ok: false as const, options: [], reason: '页面里没出现「配送到店模板」下拉' };
+    await press(header as HTMLElement);
+    await waitFor(() => document.querySelectorAll('li[role="option"]').length > 0, 2000);
+    const seen = new Map<string, string>();
+    for (const li of [...document.querySelectorAll('li[role="option"]')]) {
+      let node = (li as unknown as Record<string, unknown>)[
+        Object.keys(li).find((k) => k.startsWith('__reactInternalInstance')) || ''
+      ] as Record<string, unknown> | undefined;
+      let found: { label: string; value: string } | undefined;
+      for (let depth = 0; node && depth < 8; depth += 1) {
+        const option = (node.memoizedProps as Record<string, unknown> | undefined)?.option as
+          { label?: string; value?: string } | undefined;
+        if (option?.label && option.value) {
+          found = { label: option.label, value: String(option.value) };
+          break;
+        }
+        node = node.return as typeof node;
+      }
+      if (found) seen.set(found.value, found.label);
+    }
+    (header as HTMLElement).click();
+    const options = [...seen.entries()].map(([value, label]) => ({ value, label }));
+    return options.length
+      ? { ok: true as const, options }
+      : {
+          ok: false as const,
+          options: [],
+          reason: '后台下拉里一个模板也没有，请先到拼多多后台新建到店安装模板',
+        };
+  })();
+export function apiInstallType(delivery: 'store' | 'home'): string {
+  return delivery === 'store' ? '2' : '3';
+}
+// 拿到解析后的模板 ID 才算通过；名称留到页面里换 ID，见 PDD_TEMPLATE_LOOKUP。
+export function apiInstallPair(
+  delivery: 'store' | 'home',
+  template: string,
+): Record<string, string> {
+  const value = String(template ?? '').trim();
+  if (!/^SIST_[A-Za-z0-9_-]+$/.test(value))
+    throw new ExecutionError(
+      'invalid_product',
+      '到店安装模板还没换成后台模板 ID（SIST_ 开头），请先在核对界面解析模板名称',
+      'edit_product',
+    );
+  return { [apiInstallType(delivery)]: value };
+}
+/**
+ * 真正落到草稿详情里的是 `goods_srv_templates` 的 id（`srv_template_id_map` 只是表单写法）。
+ * 实测：只发 srv_template_id_map 时，读回的 goods_srv_templates 两个 id 都是空的，
+ * 安装服务等于没绑上。type 8 = 配送到店，type 10 = 配送到家。
+ */
+export function apiSrvTemplates(
+  delivery: 'store' | 'home',
+  template: string,
+): { type: number; id: string }[] {
+  const value = String(template ?? '').trim();
+  if (!/^SIST_[A-Za-z0-9_-]+$/.test(value))
+    throw new ExecutionError(
+      'invalid_product',
+      '到店安装模板还没换成后台模板 ID（SIST_ 开头），请先在核对界面解析模板名称',
+      'edit_product',
+    );
+  return [
+    { type: 8, id: delivery === 'store' ? value : '' },
+    { type: 10, id: delivery === 'home' ? value : '' },
+  ];
+}
 function stock(value: string): number {
-  if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))
+  // 后台的「*库存」是必填：留空在编辑页里就是一个空输入框，提交会被拦
+  // 「请输入第 N 行规格的库存」，所以空值按 1 件上架；显式的 0 是真实库存，原样保留。
+  const raw = String(value ?? '').trim();
+  if (!raw) return 1;
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)))
     throw new ExecutionError('invalid_product', '库存须为非负整数', 'edit_product');
-  return Number(value);
+  return Number(raw);
 }
 function skuKey(options: { name: string; value: string }[]) {
   return JSON.stringify(options.map(({ name, value }) => [name, value]).sort());
@@ -163,22 +617,27 @@ export function assertApiMatrix(p: Product) {
 }
 
 // Runs in the page's realm. Signing stays inside the site's normal client.
-async function pageApi(input: {
-  route: string;
-  method: 'get' | 'post';
-  body: unknown;
-  shop: { name: string; account: string };
-}) {
+// 身份判定必须与主进程同一套：后台把子账号渲染成「主账号:子账号(真实姓名)」，
+// 只比整行文字会永远判成换了账号（那正是 shop_changed 的来源）。
+async function pageApi(
+  input: { route: string; method: 'get' | 'post'; body: unknown; shop: GuardShop },
+  matchesLogin: (state: GuardState, shop: GuardShop) => boolean,
+  anchor: unknown,
+) {
   const header = document.querySelector('header') || document.querySelector('[role=banner]');
   const names = ((header as HTMLElement | null)?.innerText || '').split('\n').map((s) => s.trim());
-  const text = header?.textContent || '';
-  if (
-    location.origin !== 'https://mms.pinduoduo.com' ||
-    !text.includes('退出当前账号') ||
-    !names.includes(input.shop.name) ||
-    (input.shop.account.includes(':') && !names.includes(input.shop.account))
-  )
-    return { ok: false, identity: true };
+  const logout = (header?.textContent || '').includes('退出当前账号');
+  const state: GuardState = {
+    trusted: location.origin === 'https://mms.pinduoduo.com' && logout,
+    names,
+    loginPage: false,
+    form: false,
+    rejected: false,
+    challenge: false,
+    structure: { logoutTextPresent: logout },
+    anchor,
+  };
+  if (!matchesLogin(state, input.shop)) return { ok: false, identity: true };
   const sdk = (
     window as unknown as {
       __mms?: { fetch?: Record<string, (...args: unknown[]) => Promise<unknown>> };
@@ -191,23 +650,26 @@ async function pageApi(input: {
     return { ok: false };
   }
 }
-async function pageUpload(input: {
-  data: string;
-  name: string;
-  mime: string;
-  shop: { name: string; account: string };
-}) {
+async function pageUpload(
+  input: { data: string; name: string; mime: string; shop: GuardShop },
+  matchesLogin: (state: GuardState, shop: GuardShop) => boolean,
+  anchor: unknown,
+) {
   const header = (document.querySelector('header') ||
     document.querySelector('[role=banner]')) as HTMLElement | null;
-  const text = header?.textContent || '',
-    names = (header?.innerText || '').split('\n').map((s) => s.trim());
-  if (
-    location.origin !== 'https://mms.pinduoduo.com' ||
-    !text.includes('退出当前账号') ||
-    !names.includes(input.shop.name) ||
-    (input.shop.account.includes(':') && !names.includes(input.shop.account))
-  )
-    return { ok: false };
+  const names = (header?.innerText || '').split('\n').map((s) => s.trim());
+  const logout = (header?.textContent || '').includes('退出当前账号');
+  const state: GuardState = {
+    trusted: location.origin === 'https://mms.pinduoduo.com' && logout,
+    names,
+    loginPage: false,
+    form: false,
+    rejected: false,
+    challenge: false,
+    structure: { logoutTextPresent: logout },
+    anchor,
+  };
+  if (!matchesLogin(state, input.shop)) return { ok: false, identity: true };
   const sdk = (
     window as unknown as { __mms: { fetch: { post: (...args: unknown[]) => Promise<unknown> } } }
   ).__mms.fetch;
@@ -229,6 +691,40 @@ async function pageUpload(input: {
   } catch {
     return { ok: false };
   }
+}
+
+// 页面里没有主进程的作用域，核对函数要随脚本一起注入。
+export function pageApiScript(
+  input: { route: string; method: 'get' | 'post'; body: unknown },
+  shop: Shop,
+): string {
+  return (
+    '(' +
+    pageApi.toString() +
+    ')(' +
+    JSON.stringify({ ...input, shop: guardShop(shop) }) +
+    ',' +
+    PDD_LOGIN_MATCH +
+    ',' +
+    PDD_ANCHOR_READ +
+    ')'
+  );
+}
+export function pageUploadScript(
+  input: { data: string; name: string; mime: string },
+  shop: Shop,
+): string {
+  return (
+    '(' +
+    pageUpload.toString() +
+    ')(' +
+    JSON.stringify({ ...input, shop: guardShop(shop) }) +
+    ',' +
+    PDD_LOGIN_MATCH +
+    ',' +
+    PDD_ANCHOR_READ +
+    ')'
+  );
 }
 
 export function apiSkuMatches(
@@ -281,11 +777,7 @@ export class PddApiDraft {
   ): Promise<unknown> {
     context.guard();
     const result = await this.bridge.eval<{ ok: boolean; value?: unknown; identity?: boolean }>(
-      '(' +
-        pageApi.toString() +
-        ')(' +
-        JSON.stringify({ route, method, body, shop: { name: shop.name, account: shop.account } }) +
-        ')',
+      pageApiScript({ route, method, body }, shop),
     );
     if (!result?.ok)
       throw new ExecutionError(
@@ -496,9 +988,11 @@ export class PddApiDraft {
                 : Number(initial.is_refundable);
         if (!rules.is_refundable.includes(refund) || (rules.must_not_refundable === true && refund))
           changed('7天退货承诺与当前类目规则不同');
+        const wantsInvoice = p.services?.invoice === '是';
+        const invoice = apiInvoice(wantsInvoice, rules);
         const services: Services = {
           refund,
-          invoice: p.services?.invoice === '是' ? 1 : 0,
+          invoice: invoice.invoice,
           authenticity:
             p.services?.authenticity === '按平台规则' || !p.services?.authenticity
               ? rules.is_must_fake_one_lose_ten === true
@@ -508,14 +1002,67 @@ export class PddApiDraft {
                 ? 1
                 : 0,
         };
-        if (services.invoice) changed('当前API流程暂未支持发票类型设置，请使用原执行方式');
+        // 资料里没填的服务项不替运营编一个「否」，按当前类目规则取默认并留下说明。
+        const blank = [
+          p.services?.sevenDay ? '' : '7天无理由退货',
+          p.services?.invoice ? '' : '正品发票',
+          p.services?.authenticity ? '' : '假一赔十',
+        ].filter(Boolean);
+        if (blank.length)
+          context.patch(
+            {},
+            `资料里${blank.join('、')}没填，已按当前类目规则取默认值（没有替你填成"否"）`,
+          );
+        if (wantsInvoice && !invoice.offers)
+          context.patch(
+            {},
+            '当前类目的服务与承诺不提供正品发票，资料“正品发票=是”按不勾选执行；页面只有发货时间、7天无理由与假一赔十',
+          );
+        else if (services.invoice)
+          changed(
+            '当前类目提供发票服务，但API流程尚未支持发票类型设置，请在后台手动选择发票类型后继续',
+          );
+        if (rules.must_set_invoice === true && !wantsInvoice)
+          changed('当前类目要求提供正品发票，资料未勾选');
         if (rules.is_must_fake_one_lose_ten === true && !services.authenticity)
           changed('当前类目要求假一赔十，资料未勾选');
-        patch({ freightId: id(freight[0].costTemplateId), services });
+        let installTemplateId: string | undefined;
+        if (p.install) {
+          const typed = p.install.template.trim();
+          if (!typed)
+            changed(
+              '这间店铺还没选到店安装模板：请在资料页点「读取后台模板」选一次（选中后会记在这家店上），或在资料「到店安装模板」里填 SIST_ 开头的模板 ID',
+            );
+          if (/^SIST_[A-Za-z0-9_-]+$/.test(typed)) installTemplateId = typed;
+          else {
+            const found = await this.bridge.eval<{
+              ok: boolean;
+              id?: string;
+              reason?: string;
+              options?: Array<{ label?: string; value?: string }>;
+            }>(`(${PDD_TEMPLATE_LOOKUP.toString()})(${JSON.stringify(p.install.template)})`);
+            if (!found?.ok || !found.id) {
+              const names = (found?.options || []).map((option) => option.label).filter(Boolean);
+              changed(
+                `到店安装模板「${p.install.template}」在后台下拉里没找到（${found?.reason || '名称不一致'}）` +
+                  (names.length ? `，现在有：${names.join('、')}` : '') +
+                  '；请填写下拉里显示的名称，或直接填 SIST_ 开头的模板 ID',
+              );
+            }
+            installTemplateId = found.id;
+            context.patch({}, `到店安装模板「${p.install.template}」已换成后台模板 ${found.id}`);
+          }
+        }
+        patch({
+          freightId: id(freight[0].costTemplateId),
+          services,
+          ...(installTemplateId ? { installTemplateId } : {}),
+        });
         return { seconds, services };
       },
       'services',
     );
+
     const uploaded = { ...t.apiDraft?.uploads };
     await context.step(
       'API上传主图详情图及规格图',
@@ -526,21 +1073,31 @@ export class PddApiDraft {
           context.guard();
           if (uploaded[asset.id]) continue;
           await this.checkIdentity();
-          const result = await this.bridge.eval<{ ok: boolean; value?: unknown }>(
-            '(' +
-              pageUpload.toString() +
-              ')(' +
-              JSON.stringify({
+          const result = await this.bridge.eval<{
+            ok: boolean;
+            value?: unknown;
+            identity?: boolean;
+          }>(
+            pageUploadScript(
+              {
                 data: fs
                   .readFileSync(path.join(this.directory, 'assets', asset.id))
                   .toString('base64'),
                 name: asset.name,
                 mime: asset.format === 'png' ? 'image/png' : 'image/jpeg',
-                shop: { name: shop.name, account: shop.account },
-              }) +
-              ')',
+              },
+              shop,
+            ),
           );
-          if (!result?.ok) changed('API图片上传未确认：' + asset.name);
+          if (!result?.ok) {
+            if (result?.identity)
+              throw new ExecutionError(
+                'shop_changed',
+                'API图片上传前核对登录身份未通过：' + asset.name + '，请核对当前登录的店铺与子账号',
+                'inspect_form',
+              );
+            changed('API图片上传未确认：' + asset.name);
+          }
           const image = record(result.value, '图片上传');
           const url = new URL(String(image.url));
           if (
@@ -588,6 +1145,18 @@ export class PddApiDraft {
       two_pieces_discount: discount,
       image_url: image(p.main[0]),
       is_size_spec_sync_detail: 1,
+      ...(p.install
+        ? {
+            srv_template_id_map: apiInstallPair(
+              p.install.delivery,
+              t.apiDraft?.installTemplateId || p.install.template,
+            ),
+            goods_srv_templates: apiSrvTemplates(
+              p.install.delivery,
+              t.apiDraft?.installTemplateId || p.install.template,
+            ),
+          }
+        : {}),
       skus: p.skus.map((s) => ({
         id: 0,
         limit_quantity: 0,
@@ -605,7 +1174,7 @@ export class PddApiDraft {
         length: null,
         sim_direct_ext_params: null,
         spec: (s.options || []).map((o) => specMap.get(skuKey([o]))!),
-        sku_srv_templates: '',
+        sku_srv_templates: apiRim(p, s) ? JSON.stringify({ rimDiameter: apiRim(p, s) }) : '',
         shipment_limit_second_list: [],
         sku69_code: '',
       })),
@@ -748,6 +1317,11 @@ export class PddApiDraft {
               d.invoice_status === state.services!.invoice &&
               d.is_folt === state.services!.authenticity,
             '售后承诺',
+          ],
+          [
+            'install',
+            apiInstallMatches(p, d as Row, state.installTemplateId),
+            '到店安装类型、模板与轮辋直径',
           ],
           [
             'discount',

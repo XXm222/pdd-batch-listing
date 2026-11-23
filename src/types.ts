@@ -1,4 +1,5 @@
 import type { PlatformId } from './platforms';
+import type { AccountKind } from './shop-account';
 
 export type Asset = {
   id: string;
@@ -10,6 +11,13 @@ export type Asset = {
   format?: 'png' | 'jpg';
 };
 export type ImageTarget = { kind: 'main' | 'detail' | 'sku'; index?: number };
+/** 到店安装服务：开启后每个 SKU 还必须填写轮辋直径（见 pdd-rim.ts）。 */
+export type InstallService = {
+  /** 到店安装类型：配送到店 / 配送到家。 */
+  delivery: 'store' | 'home';
+  /** 后台服务模板 ID，形如 SIST_418714932725772662。 */
+  template: string;
+};
 export type Sku = {
   spec: string;
   group: string;
@@ -18,6 +26,8 @@ export type Sku = {
   code?: string;
   image?: string;
   options?: { name: string; value: string }[];
+  /** 轮辋直径，取后台下拉的文案（如「17英寸」「防爆胎18英寸」），见 pdd-rim.ts。 */
+  rim?: string;
 };
 export type ProductAttribute = { name: string; value: string; required: boolean };
 export type Services = { sevenDay: string; invoice: string; authenticity: string };
@@ -73,6 +83,8 @@ export type Product = {
   templateFormat: string;
   attributes?: ProductAttribute[];
   services?: Services;
+  /** 到店安装服务；未开启时为 undefined。 */
+  install?: InstallService;
   demoDeclared?: boolean;
 };
 export type Shop = {
@@ -83,6 +95,22 @@ export type Shop = {
   updatedAt: string;
   /** 旧资料没有该字段，读取时按拼多多处理，见 platforms.ts。 */
   platform?: PlatformId;
+  /**
+   * 首次登录核对成功后写入的后台身份编号（拼多多 `mall_id` / 用户 `id`）。
+   * 账号在后台的显示形态千变万化，这两个整数不变；有绑定就只比整数，
+   * 不再靠页面文字解析。账号被改动时绑定作废，见 shop-service.ts。
+   */
+  mallId?: number;
+  userId?: number;
+  /** 录入口径：main:sub、mobile、email、numeric-id、plain。 */
+  accountKind?: AccountKind;
+  /** 最近一次写入绑定的时间。 */
+  boundAt?: string;
+  /**
+   * 这家店惯用的到店安装模板。资料里没填模板时用它，
+   * 运营只在界面上选一次，之后新建商品自动带上。
+   */
+  installTemplate?: { id: string; label: string };
 };
 export type ShopGoods = {
   goodsId: string;
@@ -188,6 +216,8 @@ export type Task = {
     freightId?: number;
     services?: { refund: number; invoice: number; authenticity: number };
     uploads?: Record<string, { url: string; width: number; height: number }>;
+    /** 到店安装模板在页面下拉里解析出来的模板 ID（资料里填名字时用）。 */
+    installTemplateId?: string;
   };
   backendChecks?: BackendCheck[];
   phase?: string;
@@ -335,10 +365,19 @@ export interface DesktopApi {
   copyBridgeAddress(): Promise<void>;
   copyExtensionPage(browser: 'chrome' | 'edge'): Promise<void>;
   load(): Promise<Workspace>;
-  importData(kind: 'excel' | 'folder' | 'example'): Promise<Product[] | null>;
+  importData(
+    kind: 'excel' | 'folder' | 'example',
+  ): Promise<{ products: Product[]; failures: { file: string; reason: string }[] } | null>;
   supplement(): Promise<Asset[] | null>;
   saveProducts(products: Product[]): Promise<Workspace>;
   saveShop(input: ShopInput): Promise<Workspace>;
+  /** 读后台「配送到店模板」下拉里的模板，给界面做下拉用。 */
+  installTemplates(productId: string): Promise<{ label: string; value: string }[]>;
+  /** 把这件商品的模板记到店铺上，下次新建商品自动带。 */
+  bindInstallTemplate(
+    productId: string,
+    template: { id: string; label: string },
+  ): Promise<Workspace>;
   loginShop(input: { id: string; mode: 'relogin' | 'check' }): Promise<ShopLoginResult>;
   onShopLoginChanged(listener: (result: ShopLoginResult) => void): () => void;
   prepareTasks(input: {

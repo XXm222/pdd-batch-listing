@@ -47,7 +47,9 @@ export function TemplateDownload({
         <p>
           同商品保持同一商品编码。重复导入时可以核对变化，选择更新已有资料或跳过。保存后勾选商品，再选择或添加店铺。
         </p>
-        <p>批量商品可同时上传多份 Excel。“选择文件夹”入口目前待开发，请使用单文件 Excel 导入。</p>
+        <p>
+          批量商品可同时上传多份 Excel，也可以直接选一个文件夹，把表格与主图、详情图一起匹配。
+        </p>
         <div className="quiet-note">模板无需填写店铺和后台链接。</div>
       </div>
     </Modal>

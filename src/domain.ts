@@ -1,4 +1,5 @@
 import type { Asset, ImageTarget, Product, Sku } from './types';
+import { RIM_OPTIONS } from './pdd-rim';
 import { DEFAULT_PLATFORM, platformMeta, type PlatformId } from './platforms';
 export const uid = () => crypto.randomUUID();
 /** 淘宝模板的 templateFormat 标记；导入器与校验都按它分支。 */
@@ -173,7 +174,14 @@ export function problems(p: Product): string[] {
   const skuCodes = new Set<string>();
   const combinations = new Set<string>();
   p.skus.forEach((s, i) => {
-    const row = `${isStructuredProduct(p) ? '组合' : '规格'} ${i + 1}`;
+    // 问题清单要说清是哪一行：结构化商品带上组合的选项值（如「组合 3（红款）」）。
+    const label = isStructuredProduct(p)
+      ? (s.options || [])
+          .map((o) => o.value.trim())
+          .filter(Boolean)
+          .join(' / ')
+      : s.spec.trim();
+    const row = `${isStructuredProduct(p) ? '组合' : '规格'} ${i + 1}${label ? `（${label}）` : ''}`;
     if (!s.spec.trim()) out.push(`${row} 名称未填写`);
     if (!isStructuredProduct(p) && specs.has(s.spec.trim())) out.push(`规格名称重复：${s.spec}`);
     specs.add(s.spec.trim());
@@ -204,21 +212,37 @@ export function problems(p: Product): string[] {
           ['group', '拼单价'],
           ['single', '单买价'],
         ] as const))
-      if (!/^\d+(\.\d{1,2})?$/.test(s[key].trim()) || Number(s[key]) <= 0)
-        out.push(`${row} ${label}须为正金额，最多两位小数`);
+      if (!/^\d+(\.\d{1,2})?$/.test(s[key].trim()) || Number(s[key]) <= 0) {
+        // 手填三位小数、或公式缓存带一长串小数，都原样留在资料里，由这里点名让运营决定。
+        out.push(
+          /^\d+\.\d{3,}$/.test(s[key].trim())
+            ? `${row} ${label}是「${s[key].trim()}」，超过两位小数，后台只收两位；程序不会替你取整，请确认后改（编辑器里有「金额取整」按钮）`
+            : `${row} ${label}须为正金额，最多两位小数`,
+        );
+      }
     if (!taobao && Number(s.group) > Number(s.single)) out.push(`${row} 拼单价不能高于单买价`);
     if (!/^\d+$/.test(s.stock.trim()) || Number(s.stock) > 99999999)
       out.push(`${row} 库存须为非负整数`);
   });
+  // 到店安装：开启后每行规格都必须带轮辋直径，且只能取后台下拉里的固定文案。
+  // 模板可以留空——它有两种来源：资料里填过，或这家店铺在界面上选过一次（会记在店铺上）。
+  if (p.install) {
+    for (const [i, s] of p.skus.entries())
+      if (!s.rim || !RIM_OPTIONS.includes(s.rim))
+        out.push(`第${i + 1}行规格的轮辋直径须从后台下拉选择，如 17英寸、防爆胎18英寸`);
+  }
   const services = { sevenDay: '按平台规则', invoice: '否', authenticity: '否', ...p.services };
   if (p.category.endsWith('沐浴桶/沐浴盆') && services.sevenDay === '否')
     out.push('当前泡脚桶类目必须支持 7 天无理由退货');
+  // 空值表示「运营还没选」：执行阶段按当前类目规则取默认，并在执行记录里写明，
+  // 所以这里只校验写了的取值，不把空当错误（写死「否」反而可能在要求假一赔十的类目被拦下）。
   for (const [label, value] of [
     ['7天无理由退货', services.sevenDay],
     ['正品发票', services.invoice],
     ['假一赔十', services.authenticity],
   ])
-    if (!['是', '否', '按平台规则'].includes(value)) out.push(`${label}请选择是、否或按平台规则`);
+    if (value && !['是', '否', '按平台规则'].includes(value))
+      out.push(`${label}请选择是、否或按平台规则`);
   const attributes = new Set<string>();
   for (const a of p.attributes || []) {
     if (!a.name.trim() || (a.required && !a.value.trim()))
@@ -420,21 +444,37 @@ export function shopNameFromAccount(account: string): string {
   const index = text.search(/[:：]/);
   return index > 0 && text.slice(index + 1).trim() ? text.slice(0, index).trim() : '';
 }
+/**
+ * 决定这条店铺记录最终保存的名称。
+ *
+ * 手填永远优先：后台店铺名称才是权威值，登录账号的前半段只是「主账号名」，
+ * 很多商家两者并不相同（主账号 `邓禄普`，店铺 `邓禄普黑豆专卖店`），
+ * 所以不能让推导结果覆盖用户输入，推导只在用户留空时兜底。
+ */
 export function resolveShopName(
   name: string,
   account: string,
   isNew: boolean,
   platform: PlatformId = DEFAULT_PLATFORM,
+  derived?: string,
 ): string {
   const meta = platformMeta(platform);
-  const resolved =
-    isNew && meta.derivesNameFromAccount ? shopNameFromAccount(account) : name.trim();
-  if (isNew && !resolved)
+  const typed = String(name || '').trim();
+  if (!isNew) {
+    if (!typed) throw new Error('店铺名称须为 1 至 50 个字符');
+    if (typed.length > 50) throw new Error('店铺名称须为 1 至 50 个字符');
+    return typed;
+  }
+  const fallback = meta.derivesNameFromAccount
+    ? String(derived ?? shopNameFromAccount(account)).trim()
+    : '';
+  const resolved = typed || fallback;
+  if (!resolved)
     throw new Error(
       meta.derivesNameFromAccount
-        ? '登录账号请按“店铺名:子账号”填写，支持中英文冒号'
+        ? '请填写与后台一致的店铺名称；登录账号可按“店铺名:子账号”填写'
         : `请填写${meta.label}店铺名称`,
     );
-  if (!resolved || resolved.length > 50) throw new Error('店铺名称须为 1 至 50 个字符');
+  if (resolved.length > 50) throw new Error('店铺名称须为 1 至 50 个字符');
   return resolved;
 }

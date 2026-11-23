@@ -33,7 +33,10 @@ test('blank download stays empty and separate example includes two complete SKUs
     assert.equal(p.main.length, 1);
     assert.equal(p.detail.length, 1);
     assert.ok(p.skus.every((s) => s.image && p.images[s.image]));
-    assert.equal(assets.length, 4);
+    // 示例模板里轮播图与规格图是同一张图，导入时按内容去重成一份资产。
+    assert.equal(assets.length, 2);
+    assert.equal(p.main[0], p.skus[0].image);
+    assert.equal(new Set(p.skus.map((s) => s.image)).size, 1);
     assert.deepEqual(problems(p), []);
     for (const a of assets) assert.ok((await fs.stat(path.join(directory, a.id))).size > 0);
     assert.ok(

@@ -19,13 +19,20 @@ import { imageUploadSizeLimit, imageSizeText } from '../../src/domain';
 import { LOGIN_STATE, PddLogin, shopIdentityMessage } from './pdd-login';
 import {
   isPddLoginConfirmed,
+  matchesPddLogin,
   matchesPddIdentity,
+  pddAnchorVerdict,
+  readPddAnchor,
+  PDD_ANCHOR_READ,
   PDD_IDENTITY_MATCH,
   PDD_LOGIN_CONFIRMED,
+  PDD_LOGIN_MATCH,
+  type PddAnchor,
 } from './pdd-identity';
+import { templateShopProblem } from './pdd-template-guard';
 import { PDD_DISCOUNT_STATE, type DiscountPageFacts } from './pdd-discount';
 import { BrowserBridge, flatten } from '../browser-bridge';
-import { PddApiDraft } from './pdd-api-draft';
+import { PddApiDraft, PDD_TEMPLATE_OPTIONS } from './pdd-api-draft';
 import { ExecutionError, type ExecutionContext } from '../execution';
 import type { Product, Shop, Task, TaskStep, BackendCheck, ShopLoginEvent } from '../../src/types';
 import type { LoginPageFacts, PageFacts, PageRecovery, RecoveryResult } from '../agent-service';
@@ -166,6 +173,14 @@ function imageExtension(file: string, label: string) {
   if (length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return '.jpg';
   throw new Error(`无法确认图片格式，未上传：${label}`);
 }
+// 页面脚本只带可核对字段：名称、账号，以及绑定过的后台编号（有则比整数，不留文字）。
+const shopIdentityJson = (shop: Pick<Shop, 'name' | 'account' | 'mallId' | 'userId'>) =>
+  JSON.stringify({
+    name: shop.name,
+    account: shop.account,
+    mallId: shop.mallId,
+    userId: shop.userId,
+  });
 export class PddAdapter {
   private bridge = new BrowserBridge('https://mms.pinduoduo.com/home/');
   private context!: ExecutionContext;
@@ -192,8 +207,8 @@ export class PddAdapter {
     return this.bridge.eval<PageFacts>(
       `(() => {
       if(location.origin!=='https://mms.pinduoduo.com'||new URL(location.href).searchParams.get('goods_id')!==${JSON.stringify(t.goodsId)})return {available:false,reason:'当前页面不是该任务的原商品填写页'};
-      const loginState=${LOGIN_STATE};const header=loginState.names||[];const shop=${JSON.stringify({ name: shop.name, account: shop.account })};
-      if(!(${PDD_LOGIN_CONFIRMED})(loginState,shop)||!(${PDD_IDENTITY_MATCH})(header,shop))return {available:false,reason:'后台店铺身份未核对，页面未读取'};
+      const loginState=${LOGIN_STATE};const shop=${shopIdentityJson(shop)};
+      if(!(${PDD_LOGIN_MATCH})(loginState,shop))return {available:false,reason:'后台店铺身份未核对，页面未读取'};
       const title=document.querySelector('[data-tracking-click-viewid="title_input_area"]');
       if(!title)return {available:false,reason:'未找到原商品填写表单'};
       const fields=[{name:'商品标题',value:title.value.slice(0,200)}];const errors=[];
@@ -231,14 +246,17 @@ export class PddAdapter {
       const loginState=${LOGIN_STATE};
       const header=document.querySelector('header')||document.querySelector('[role=banner]');
       const names=loginState.names||[];
-      const shopName=${JSON.stringify(shop.name)},account=${JSON.stringify(shop.account)};
+      const shopName=${JSON.stringify(shop.name)},account=${JSON.stringify(shop.account)},mallId=${JSON.stringify(shop.mallId)},userId=${JSON.stringify(shop.userId)};
+      const shopFacts={name:shopName,account,mallId,userId};
       const fold=s=>s.replace(/[A-Z]/g,c=>c.toLowerCase());
+      // The header appends the subaccount's real name: "主账号:子账号(真实姓名)".
+      const bare=s=>s.replace(/(?:\\s*[（(][^()（）]*[)）])+\\s*$/,'').trim();
       const logoutPresent=!!(loginState.structure?.logoutDomPresent||loginState.structure?.logoutTextPresent);
       const logoutVisible=!!loginState.structure?.logoutVisible;
       const headerLoaded=names.some(s=>s!=='退出当前账号'&&!s.includes('*'));
       const text=document.body?.innerText||'';
       const security=/账号已被锁定|账号被锁定/.test(text)?'account_locked':/账号或密码错误|账户或密码错误|用户名或密码错误|密码不正确|密码错误|账号不存在|账户不存在/.test(text)?'credentials_rejected':/请输入短信验证码|短信验证/.test(text)?'sms':/请拖动滑块|拖动滑块完成|滑动完成验证|点击完成验证|请完成安全验证|请完成验证/.test(text)||[...document.querySelectorAll('iframe')].some(e=>visible(e)&&/captcha|verify|验证码|安全验证/i.test(e.title+' '+e.src))?'captcha':/无权限访问|没有访问权限|账号权限不足/.test(text)?'permission_required':'none';
-      return {trustedOrigin:true,path:/^\\/login(?:\\/|$)/.test(location.pathname)?'/login':/^\\/home(?:\\/|$)/.test(location.pathname)?'/home':/^\\/goods(?:\\/|$)/.test(location.pathname)?'/goods':'other',headerPresent:!!header,headerLoaded,logoutPresent,logoutVisible,signedIn:(${PDD_LOGIN_CONFIRMED})(loginState,{name:shopName,account}),loginPage:!!loginState.loginPage,accountFormVisible:!!loginState.form,shopExact:names.includes(shopName),shopCaseOnly:!names.includes(shopName)&&names.some(n=>fold(n)===fold(shopName)),accountExact:names.includes(account),accountRequired:account.includes(':'),identityMatches:(${PDD_IDENTITY_MATCH})(names,{name:shopName,account}),security};
+      return {trustedOrigin:true,path:/^\\/login(?:\\/|$)/.test(location.pathname)?'/login':/^\\/home(?:\\/|$)/.test(location.pathname)?'/home':/^\\/goods(?:\\/|$)/.test(location.pathname)?'/goods':'other',headerPresent:!!header,headerLoaded,logoutPresent,logoutVisible,signedIn:(${PDD_LOGIN_CONFIRMED})(loginState,shopFacts),loginPage:!!loginState.loginPage,accountFormVisible:!!loginState.form,shopExact:names.includes(shopName),shopCaseOnly:!names.includes(shopName)&&names.some(n=>fold(n)===fold(shopName)),accountExact:names.includes(account)||names.some(n=>bare(n)===account),accountRequired:account.includes(':'),identityMatches:(${PDD_LOGIN_MATCH})(loginState,shopFacts),security};
     })()`,
       5000,
     );
@@ -292,8 +310,8 @@ export class PddAdapter {
       `(() => {
       if(location.origin!=='https://mms.pinduoduo.com')return false;
       const id=new URL(location.href).searchParams.get('goods_id');if(id&&id!==${JSON.stringify(t.goodsId)})return false;
-      const loginState=${LOGIN_STATE};const shop=${JSON.stringify({ name: shop.name, account: shop.account })};
-      return (${PDD_LOGIN_CONFIRMED})(loginState,shop)&&(${PDD_IDENTITY_MATCH})(loginState.names||[],shop);
+      const loginState=${LOGIN_STATE};const shop=${shopIdentityJson(shop)};
+      return (${PDD_LOGIN_MATCH})(loginState,shop);
     })()`,
       5000,
     );
@@ -464,24 +482,148 @@ export class PddAdapter {
   private async checkIdentity(shop: Shop) {
     const state = await this.bridge.wait(
       async () => {
-        const s = await this.bridge.eval<Parameters<typeof isPddLoginConfirmed>[0]>(
-          LOGIN_STATE,
-          5000,
-        );
-        return isPddLoginConfirmed(s, shop) ? s : false;
+        const raw = await this.bridge.eval<
+          Parameters<typeof isPddLoginConfirmed>[0] & { anchor?: unknown }
+        >(LOGIN_STATE, 5000);
+        const s = { ...raw, anchor: readPddAnchor(raw?.anchor) };
+        return isPddLoginConfirmed(s, shop) || pddAnchorVerdict(s.anchor, shop) === 'mismatch'
+          ? s
+          : false;
       },
       12000,
       '后台登录身份尚未加载，请稍后继续',
     );
-    if (!matchesPddIdentity(state.names, shop))
+    if (pddAnchorVerdict(state.anchor, shop) === 'mismatch')
+      throw new NeedsUser('后台登录的店铺或子账号与店铺管理中保存的后台绑定不一致，请核对后继续');
+    if (!matchesPddIdentity(state.names, shop) && pddAnchorVerdict(state.anchor, shop) !== 'bound')
       throw new NeedsUser(`后台登录店铺与所选店铺“${shop.name}”不一致，请核对后继续`);
     this.check('identity', true, shopIdentityMessage(shop));
+  }
+  /** 读取结束后把标签页导回运营原本停的地方。 */
+  private async restorePage(href: string) {
+    if (!href || !href.includes('mms.pinduoduo.com')) return;
+    const now = await this.bridge.eval<string>('location.href').catch(() => '');
+    if (!now || now === href) return;
+    await this.bridge.navigate(href).catch(() => undefined);
+  }
+  /** 读后台「配送到店模板」下拉里的模板，给资料界面做成下拉选择。 */
+  async installTemplates(
+    shop: Shop,
+    editUrls: string | string[] = [],
+  ): Promise<{ label: string; value: string }[]> {
+    await this.bridge.connect();
+    // 桥接的 evaluate 不带 tabId，读模板只能在本标签页里跳转；先记下运营原本停在哪一页，
+    // 读完导回去——否则他正在编辑的商品会被顶走，没保存的改动就丢了。
+    const openedWith = await this.bridge.eval<string>('location.href').catch(() => '');
+    try {
+      return await this.readInstallTemplates(shop, editUrls);
+    } finally {
+      await this.restorePage(openedWith);
+    }
+  }
+  private async readInstallTemplates(
+    shop: Shop,
+    editUrls: string | string[] = [],
+  ): Promise<{ label: string; value: string }[]> {
+    // connect() 只按商家后台域名挑标签页，运营手动切到的商品编辑页未必在绑定的那一页上；
+    // 先把已经打开的编辑页绑过来，读不到再走下面的候选地址兜底。
+    await this.bridge.focusTab('https://mms.pinduoduo.com/goods/goods_add').catch(() => false);
+    type Options = { ok: boolean; options?: { label: string; value: string }[]; reason?: string };
+    // 整次读取共用一份时间预算：以前每个等待各自 45 秒，候选页一多（最多 3 个 × 3 个等待）
+    // 最坏能拖到 9 分钟，界面上就是「点了没反应」。现在总共 45 秒，用完即报错。
+    const deadline = Date.now() + 45000;
+    const remaining = () => Math.max(0, deadline - Date.now());
+    // 换电脑最容易踩的坑：旧机器上「草稿编辑页」和「桥接标签页」都是热的，
+    // 新机器上标签页可能停在商品列表、也可能干脆没打开过编辑页，所以这里三路兜底：
+    // 当前页已经是编辑页就直接读 → 用草稿地址逐个打开 → 都没有就给可执行的提示。
+    const onEditPage = async () => {
+      try {
+        const href = await this.bridge.eval<string>('location.href');
+        if (!href || !href.includes('/goods/goods_add')) return false;
+        return (
+          (await this.bridge.eval<boolean>(
+            'Boolean(document.body && document.body.innerText.includes("服务与承诺"))',
+          )) === true
+        );
+      } catch {
+        return false;
+      }
+    };
+    const readOptions = () =>
+      this.bridge.eval<Options>(
+        `(${PDD_TEMPLATE_OPTIONS.toString()})()`,
+        Math.max(1000, remaining()),
+      );
+    const firstProblem = (result: Options | undefined) =>
+      result?.reason || '没读到后台的到店安装模板';
+    // 串店守门：浏览器里开着的编辑页属于哪家店，必须和目标店铺一致，
+    // 否则会把别家店的模板读回来，甚至读到别家店的服务设置。
+    const assertTargetShop = async () => {
+      const live = readPddAnchor(await this.bridge.eval<unknown>(PDD_ANCHOR_READ, 5000));
+      // 规则见 templateShopProblem：没拿到正向身份凭据就必须停下，
+      // 以前这里对「没绑定编号 + 读不到店名」是放行的，浏览器停在别家店就会读回别家的模板。
+      const problem = templateShopProblem(shop, live);
+      if (problem) throw new NeedsUser(problem);
+    };
+
+    if (await onEditPage()) {
+      await assertTargetShop();
+      const here = await readOptions();
+      if (here?.ok) return here.options || [];
+      throw new NeedsUser(
+        `${firstProblem(here)}。当前浏览器已经停在商品编辑页，请手动展开「服务与承诺 → 更多服务 → 展开修改」并勾选「到店安装」，再点一次「读取后台模板」。`,
+      );
+    }
+
+    const urls = (Array.isArray(editUrls) ? editUrls : [editUrls]).filter(Boolean).slice(0, 3);
+    let lastProblem = '';
+    for (const url of urls) {
+      if (remaining() <= 0) break;
+      try {
+        // 必须在本标签页内跳转：桥接的 evaluate 不带 tabId，新开标签页后脚本会打在原来那一页上。
+        await this.bridge.navigate(url);
+        await this.bridge.wait(
+          async () =>
+            (await this.bridge.eval<string>('location.href')).includes('/goods/goods_add'),
+          Math.max(1000, remaining()),
+          '没打开拼多多商品编辑页，请检查浏览器是否已登录拼多多商家后台',
+        );
+        await this.bridge.wait(
+          async () =>
+            (await this.bridge.eval<boolean>('document.readyState === "complete"')) === true,
+          Math.max(1000, remaining()),
+          '拼多多商品编辑页加载超时，请检查网络后重试',
+        );
+        await this.bridge.wait(
+          async () =>
+            (await this.bridge.eval<boolean>(
+              'Boolean(document.body && document.body.innerText.includes("服务与承诺"))',
+            )) === true,
+          Math.max(1000, remaining()),
+          '商品编辑页还没渲染出「服务与承诺」，请检查网络后重试',
+        );
+        await assertTargetShop();
+        const result = await readOptions();
+        if (result?.ok) return result.options || [];
+        lastProblem = firstProblem(result);
+      } catch (error) {
+        // 串店与身份确认的问题要原样抛给运营，不要被「没读到模板」盖掉。
+        if (error instanceof NeedsUser) throw error;
+        lastProblem = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    throw new NeedsUser(
+      urls.length
+        ? `${lastProblem}。已经试过 ${urls.length} 个草稿编辑页都没读到模板，请在浏览器里打开任意商品编辑页，手动勾选「到店安装」后把页面停在「服务与承诺」，再点一次「读取后台模板」。`
+        : '这台电脑还没有打开过拼多多商品编辑页，程序也不知道该打开哪个草稿。请先在浏览器打开拼多多商家后台的任意商品编辑页（服务与承诺可见），再点一次「读取后台模板」。',
+    );
   }
   async verifyLogin(
     shop: Shop,
     mode: 'relogin' | 'check',
     onEvent: (event: ShopLoginEvent) => void,
-  ) {
+  ): Promise<PddAnchor | undefined> {
     if (mode === 'relogin') {
       const startedAt = new Date().toISOString(),
         start = performance.now();
@@ -504,7 +646,10 @@ export class PddAdapter {
         throw error;
       }
     }
-    await new PddLogin(this.bridge, this.decrypt, onEvent).run(shop, mode);
+    const login = new PddLogin(this.bridge, this.decrypt, onEvent);
+    await login.run(shop, mode);
+    // 核对通过后把后台身份编号交回主进程，由她决定是否写进店铺绑定。
+    return login.anchor;
   }
   private async login(shop: Shop, t: Task, checkOnly = false) {
     this.patch(t, { phase: '登录并核对店铺' }, '核对后台店铺身份');

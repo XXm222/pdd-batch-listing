@@ -12,7 +12,8 @@ import {
   imageProblems,
   isTaobaoProduct,
 } from '../src/domain';
-import type { Asset, Product } from '../src/types';
+import type { Asset, InstallService, Product } from '../src/types';
+import { rimDiameterLabel, rimOptionLabel } from '../src/pdd-rim';
 import { readWorkbookPictures, type WorkbookPicture } from './workbook-images';
 
 const mapping: Record<string, keyof Product> = {
@@ -42,6 +43,13 @@ function text(value: any): string {
   if (Object.hasOwn(value, 'r')) return text(value.r);
   return '';
 }
+// 运营常用公式算价（如单买价 = 拼单价/0.99），Excel 缓存值会留一长串小数。
+// 报价一律原样保留：手填 39.456 就是 39.456，公式缓存 49.554 也是 49.554。
+// 后台只收两位小数，所以超出的值由 src/domain.ts 的问题清单点出来（商品 + 规格行 + 列名），
+// 让运营自己决定是改资料还是用编辑器里的「金额取整」按钮，程序不替人改价。
+function money(value: string): string {
+  return String(value ?? '').trim();
+}
 const list = (value: any): any[] =>
   value === undefined || value === null || value === ''
     ? []
@@ -60,10 +68,32 @@ function skuHeader(label: string): string {
     具体选项1: '规格一值',
     区分方式2: '规格二名称',
     具体选项2: '规格二值',
+    '轮辋直径（选填）': '轮辋直径',
+    '轮辋直径（英寸）': '轮辋直径',
     '规格编码（选填）': '规格编码',
   };
   return aliases[compact] || label;
 }
+/**
+ * 解析「到店安装」相关的三行。三项都留空表示这件商品不开到店安装。
+ * 模板既接受后台模板 ID（SIST_ 开头），也接受模板名称原文，
+ * 名称要到执行阶段才能换成 ID，见 pdd-api-draft.ts 的报错提示。
+ */
+export function parseInstall(values: Record<string, string>): InstallService | undefined {
+  const enabled = (values['到店安装'] || '').trim();
+  if (!enabled) return undefined;
+  if (!['是', '否'].includes(enabled)) throw new Error('到店安装只能填写是或否');
+  if (enabled === '否') return undefined;
+  const deliveryText = (values['到店安装类型'] || '').trim() || '配送到店';
+  const delivery =
+    deliveryText === '配送到店' ? 'store' : deliveryText === '配送到家' ? 'home' : undefined;
+  if (!delivery) throw new Error('到店安装类型只能填写「配送到店」或「配送到家」');
+  const template = (values['到店安装模板'] || '').trim();
+  // 模板可以留空：店铺在界面上选过一次就会记住，执行时自动补上；
+  // 两边都没有时由执行阶段给出「还没选模板」的明确提示。
+  return { delivery, template };
+}
+
 export async function parseWorkbook(file: string, assetsDir?: string): Promise<Product[]> {
   const raw = await fs.readFile(file);
   if (raw.length > 80 * 1024 * 1024) throw new Error('含图片的单个 Excel 不能超过 80MB');
@@ -124,11 +154,20 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
           const index = [...col].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0) - 1;
           if (index > 99) throw new Error('表格列数过多，请使用商品资料模板');
           if (Object.hasOwn(cell, 'f')) {
-            const match = /^(?:_xlfn\.)?DISPIMG\(\s*"([^"\r\n]+)"\s*,\s*[12]\s*\)$/i.exec(
-              text(cell.f).trim(),
-            );
-            if (!match)
-              throw new Error('请将公式转换成填写值后再导入；图片请通过插入图片功能放入图片列');
+            // 共享公式（`<f t="shared" si="0"/>`）的 f 是空元素，只有缓存值 v 带 `=DISPIMG(...)`
+            // 原文；所以公式文本优先取 f，为空再退回 v，两种写法才能一起认出来。
+            const raw = (cell['@t'] === 'str' ? text(cell.f) || text(cell.v) : text(cell.f)).trim();
+            const formula = raw.replace(/^=/, '').replace(/_xlfn\./gi, '');
+            const match = /^DISPIMG\(\s*"([^"\r\n]+)"\s*,\s*[12]\s*\)$/i.exec(formula);
+            // 公式带缓存值（Excel/WPS 保存时会写入计算结果 v）时直接取缓存值。
+            // 过去的规则是一律拒绝公式，运营用「拼单价/0.99」算单买价就整份表导不进来。
+            if (!match) {
+              const cached = cell['@t'] === 'str' ? '' : text(cell.v);
+              if (!cached)
+                throw new Error('请将公式转换成填写值后再导入；图片请通过插入图片功能放入图片列');
+              values[index] = String(cached).trim();
+              continue;
+            }
             const picture = pictures.cells.get(match[1]);
             if (!picture) throw new Error('单元格图片资源缺失，请重新插入图片并保存');
             if (!cellPictures.has(values)) cellPictures.set(values, new Map());
@@ -161,6 +200,9 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
       throw new Error(`第 ${(rowNumbers.get(row) || 0) + 1} 行图片格有多张图片，请保留一张`);
     return drawing || cell;
   }
+  // 规格图片是并发解析（Promise.all），所以占位要在 await 之前同步登记，
+  // 否则 53 个规格同时进来、同时发现「还没存过」，就会各存一份同一张图。
+  const assetByHash = new Map<string, Promise<string>>();
   async function embeddedAsset(
     p: Product,
     picture: WorkbookPicture,
@@ -170,16 +212,25 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
     const id = createHash('sha256').update(picture.raw).digest('hex');
     const size = imageSize(picture.raw),
       ext = size.type === 'png' ? 'png' : 'jpg';
+    const shared = givenName ? undefined : assetByHash.get(id);
+    if (shared) {
+      usedPictures.add(picture);
+      return shared;
+    }
     const name = givenName || `${prefix}-${id.slice(0, 8)}.${ext}`;
     if (!safeName(name)) throw new Error('图片文件名无效，请只填写文件名');
     if (p.images[name] && p.images[name].id !== id)
       throw new Error(`不同图片使用了同一名称：${name}`);
-    const a = await saveImageBytes(picture.raw, name, assetsDir);
-    if (p.images[name] && p.images[name].id !== id)
-      throw new Error(`不同图片使用了同一名称：${name}`);
-    p.images[name] = a;
-    usedPictures.add(picture);
-    return name;
+    const job = (async () => {
+      const a = await saveImageBytes(picture.raw, name, assetsDir);
+      if (p.images[name] && p.images[name].id !== id)
+        throw new Error(`不同图片使用了同一名称：${name}`);
+      p.images[name] = a;
+      usedPictures.add(picture);
+      return name;
+    })();
+    if (!givenName) assetByHash.set(id, job);
+    return job;
   }
   function checkPicturesInSheet(sheet: string[][]) {
     const floating = pictures.drawings.get(sheetNames[rows.indexOf(sheet)]);
@@ -217,6 +268,9 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
           '上架时间',
           '返点比例（%）',
           '采集来源',
+          '到店安装',
+          '到店安装类型',
+          '到店安装模板',
         ].includes(row[0])
       ) {
         if (Object.hasOwn(values, row[0])) throw new Error(`商品字段重复：${row[0]}`);
@@ -236,15 +290,20 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
     p.demo = values['是否测试素材'] === '是';
     p.source = values['采集来源'] || path.basename(file);
     p.services = {
-      sevenDay: values['7天无理由退货'] || (values['采集来源'] ? '' : '按平台规则'),
-      invoice: values['正品发票'] || (values['采集来源'] ? '' : '否'),
-      authenticity: values['假一赔十'] || (values['采集来源'] ? '' : '否'),
+      // 服务三项一律照原样保留，空的就留空（表示「运营还没选」）：
+      // 写死「按平台规则 / 否」等于替运营决定，而「假一赔十=否」在要求假一赔十的类目里
+      // 还会反过来把任务拦下来。执行阶段按当前类目规则取默认，并在执行记录里写明。
+      sevenDay: values['7天无理由退货'] || '',
+      invoice: values['正品发票'] || '',
+      authenticity: values['假一赔十'] || '',
     };
+    const install = parseInstall(values);
+    if (install) p.install = install;
     p.skus = [
       {
         spec: '默认规格',
-        group: values['拼单价（元）'] || values['一口价（元）'] || '',
-        single: values['单买价（元）'] || values['一口价（元）'] || '',
+        group: money(values['拼单价（元）'] || values['一口价（元）'] || ''),
+        single: money(values['单买价（元）'] || values['一口价（元）'] || ''),
         stock: values['库存'] || '',
       },
     ];
@@ -287,6 +346,8 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
         '库存',
       ];
       const imageColumn = header.findIndex((label) => ['规格图', '规格图文件名'].includes(label));
+      // 轮辋直径是可选列：留空时从「具体选项 / 商品标题」自动识别，见 pdd-rim.ts。
+      const rimColumn = header.findIndex((label) => ['轮辋直径', '轮胎尺寸'].includes(label));
       if (
         new Set(header.filter(Boolean)).size !== header.filter(Boolean).length ||
         imageColumn < 0 ||
@@ -308,6 +369,17 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
           if (image && !safeName(image)) throw new Error('规格图只填写安全文件名，不填写目录');
           const embedded = rowPicture(skuSheet, row, imageColumn);
           if (embedded) image = await embeddedAsset(p, embedded, `规格图-${i + 1}`, image);
+          const explicitRim = rimColumn >= 0 ? String(row[rimColumn] || '').trim() : '';
+          const rim = explicitRim
+            ? rimOptionLabel(explicitRim) ||
+              (() => {
+                throw new Error(
+                  `第${i + 1}行规格的轮辋直径「${explicitRim}」不是后台可选项，请填后台下拉里的原文，如 17英寸、防爆胎18英寸、21英寸及以上`,
+                );
+              })()
+            : rimDiameterLabel(options.map((o) => o.value).join(' '), p.title);
+          if (p.install && !rim)
+            throw new Error(`第${i + 1}行规格读不到轮辋直径，请在「轮辋直径」列填写（如 17英寸）`);
           return {
             spec: options.length
               ? options.map((o) => `${o.name}:${o.value}`).join(' / ')
@@ -316,9 +388,10 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
             code: value('规格编码'),
             image,
             // 淘宝模板只有一个「一口价」；两侧都写上，下游按平台各取所需。
-            group: taobao ? value('一口价（元）') : value('拼单价（元）'),
-            single: taobao ? value('一口价（元）') : value('单买价（元）'),
+            group: money(taobao ? value('一口价（元）') : value('拼单价（元）')),
+            single: money(taobao ? value('一口价（元）') : value('单买价（元）')),
             stock: value('库存'),
+            rim,
           };
         }),
       );
@@ -337,7 +410,10 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
         };
       const attributeIndex = info.findIndex((row) => row[0] === '属性名称' && row[1] === '填写值');
       if (attributeIndex >= 0) {
-        const extra = info.slice(attributeIndex + 1).filter((row) => row.slice(0, 3).some(Boolean));
+        const extra = info
+          .slice(attributeIndex + 1)
+          // 「采集来源」是字段行，不算类目属性（导出的表里它排在属性区之后）。
+          .filter((row) => row[0] !== '采集来源' && row.slice(0, 3).some(Boolean));
         if (extra.length > 50) throw new Error('其他类目属性最多 50 项');
         p.attributes = extra.map((row) => {
           if (row[2] && !['是', '否'].includes(row[2]))
@@ -387,8 +463,12 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
       );
       named.sort((a, b) => a.order - b.order);
       if (named.length > max) throw new Error(`${kind}数量超过 ${max} 张`);
-      if (named.some((row, i) => !Number.isInteger(row.order) || row.order !== i + 1))
-        throw new Error(`${kind}顺序须从 1 开始连续填写`);
+      // 运营常留空行（例如只填了轮播图 1、5–8），顺序有空洞不影响上传，
+      // 真正有歧义的只有「非正整数」和「重复顺序」。
+      if (named.some((row) => !Number.isInteger(row.order) || row.order < 1))
+        throw new Error(`${kind}顺序须填从 1 开始的正整数`);
+      if (new Set(named.map((row) => row.order)).size !== named.length)
+        throw new Error(`${kind}顺序不能重复`);
       if (new Set(named.map((row) => row.name)).size !== named.length)
         throw new Error(`${kind}图片文件名重复`);
       for (const row of named)
@@ -438,10 +518,15 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
       for (const [label, prop] of Object.entries(strings))
         (p as unknown as Record<string, unknown>)[prop] = value(label);
       p.services = {
-        sevenDay: value('7天无理由退货') || '按平台规则',
-        invoice: value('正品发票') || '否',
-        authenticity: value('假一赔十') || '否',
+        sevenDay: value('7天无理由退货') || '',
+        invoice: value('正品发票') || '',
+        authenticity: value('假一赔十') || '',
       };
+      p.install ??= parseInstall({
+        到店安装: value('到店安装'),
+        到店安装类型: value('到店安装类型'),
+        到店安装模板: value('到店安装模板'),
+      });
       p.main = value('主图文件')
         .split(/[;；]/)
         .map((s) => s.trim())
@@ -454,11 +539,18 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
         throw new Error('图片文件名不能包含目录');
       grouped.set(key, p);
     } else if (p.title !== value('商品标题')) throw new Error(`编码 ${code} 有不同商品标题`);
+    const spec = value('规格');
+    const explicitRim = String(value('轮辋直径') || '').trim();
+    const rim = explicitRim ? rimOptionLabel(explicitRim) : rimDiameterLabel(spec, p.title);
+    if (explicitRim && !rim) throw new Error(`轮辋直径「${explicitRim}」不是后台可选项`);
+    if (p.install && !rim)
+      throw new Error(`编码 ${code || p.title} 读不到轮辋直径，请填写「轮辋直径」列`);
     p.skus.push({
-      spec: value('规格'),
-      group: value('拼单价'),
-      single: value('单买价'),
+      spec,
+      group: money(value('拼单价')),
+      single: money(value('单买价')),
       stock: value('库存'),
+      rim,
     });
   }
   return [...grouped.values()];
@@ -471,7 +563,7 @@ export async function collectFiles(root: string, output: string[] = []): Promise
     const file = path.join(root, e.name);
     if (e.isDirectory()) await collectFiles(file, output);
     else if (e.isFile() && /\.(xlsx|png|jpe?g)$/i.test(e.name)) output.push(file);
-    if (output.length > 400) throw new Error('每次最多导入 400 个文件');
+    if (output.length > 600) throw new Error('每次最多导入 600 个文件');
   }
   return output;
 }
@@ -550,19 +642,20 @@ export async function validateLocalImageFiles(p: Product, directory: string): Pr
       if (issues.length) throw Error(issues.join('；'));
     }
 }
+export type ImportFailure = { file: string; reason: string };
 export async function importFiles(
   files: string[],
   assetsDir: string,
   withImages: boolean,
-): Promise<{ products: Product[]; assets: Asset[] }> {
-  if (files.length > 400) throw new Error('每次最多导入 400 个文件');
+): Promise<{ products: Product[]; assets: Asset[]; failures: ImportFailure[] }> {
+  if (files.length > 600) throw new Error('每次最多导入 600 个文件');
   let total = 0;
   for (const file of files) {
     const stat = await fs.lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('请选择普通文件');
     total += stat.size;
   }
-  if (total > 80 * 1024 * 1024) throw new Error('资料总大小不能超过 80MB');
+  if (total > 1024 * 1024 * 1024) throw new Error('资料总大小不能超过 1GB');
   const books = files.filter((file) => /\.xlsx$/i.test(file));
   const pictures = withImages ? files.filter((file) => /\.(png|jpe?g)$/i.test(file)) : [];
   const pictureMap = new Map<string, Asset>();
@@ -573,8 +666,18 @@ export async function importFiles(
     assets.push(a);
   }
   let products: Product[] = [];
+  const failures: ImportFailure[] = [];
   for (const book of books) {
-    const parsed = await parseWorkbook(book, assetsDir);
+    let parsed: Product[];
+    try {
+      parsed = await parseWorkbook(book, assetsDir);
+    } catch (error) {
+      failures.push({
+        file: path.basename(book),
+        reason: error instanceof Error ? error.message : '资料无法识别',
+      });
+      continue;
+    }
     for (const p of parsed) assets.push(...Object.values(p.images));
     for (const p of parsed)
       for (const name of new Set([
@@ -605,10 +708,11 @@ export async function importFiles(
     }
     products = [p];
   }
-  if (!products.length) throw new Error('未找到商品资料，请填写 Excel 模板后导入');
+  if (!products.length && !failures.length)
+    throw new Error('未找到商品资料，请填写 Excel 模板后导入');
   if (products.length > 200) throw new Error('每次最多导入 200 件商品');
   const codes = products.map((p) => p.code).filter(Boolean);
   if (new Set(codes).size !== codes.length)
     throw new Error('多份模板中有重复商品编码，请修改后导入');
-  return { products, assets };
+  return { products, assets, failures };
 }

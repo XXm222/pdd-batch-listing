@@ -3,6 +3,24 @@ import { Download, LoaderCircle, RefreshCw } from 'lucide-react';
 import { Modal } from './components';
 import type { UpdateState } from './types';
 
+const NOTE_TITLES = new Set(['新增', '修复', '优化', '变更', '其它', '已知问题']);
+
+/** 更新说明按「新增 / 修复 / 优化」分组；没有小标题的整段按一组普通条目渲染。 */
+export function groupedNotes(notes: string) {
+  const groups: { title: string; items: string[] }[] = [];
+  for (const raw of notes.split(/\r?\n/)) {
+    const line = raw.trim().replace(/^[-•·]\s*/, '');
+    if (!line) continue;
+    if (NOTE_TITLES.has(line)) {
+      groups.push({ title: line, items: [] });
+      continue;
+    }
+    if (!groups.length) groups.push({ title: '', items: [] });
+    groups[groups.length - 1].items.push(line);
+  }
+  return groups.filter((group) => group.items.length > 0);
+}
+
 export function AppUpdates({
   state,
   onClose,
@@ -116,15 +134,18 @@ export function AppUpdates({
         <section className="update-content" aria-label="更新内容">
           <h4>{state?.release ? '新版本更新内容' : '当前版本更新内容'}</h4>
           {notes ? (
-            <ul className="update-notes-list">
-              {notes
-                .split(/\r?\n/)
-                .map((line) => line.trim())
-                .filter(Boolean)
-                .map((line, i) => (
-                  <li key={i}>{line}</li>
-                ))}
-            </ul>
+            <div className="update-notes">
+              {groupedNotes(notes).map((group) => (
+                <div className="update-notes-group" key={group.title}>
+                  {group.title ? <h5>{group.title}</h5> : null}
+                  <ul className="update-notes-list">
+                    {group.items.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
           ) : (
             <p className="quiet-note">暂未提供更新说明。</p>
           )}

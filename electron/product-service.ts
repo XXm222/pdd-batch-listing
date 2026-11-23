@@ -1,5 +1,6 @@
 import { Store } from './store';
 import { safeImageName } from '../src/domain';
+import { RIM_OPTIONS } from '../src/pdd-rim';
 import type { Asset, Product } from '../src/types';
 const uuid = /^[a-f0-9-]{36}$/i;
 export function sanitizeProducts(store: Store, input: unknown): Product[] {
@@ -47,7 +48,7 @@ export function sanitizeProducts(store: Store, input: unknown): Product[] {
     )
       throw new Error(`商品编码 ${p.code} 已存在，请编辑原商品`);
     if (!Array.isArray(raw.skus) || raw.skus.length > 100) throw new Error('商品规格数量不正确');
-    p.skus = raw.skus.map((sku: Record<string, unknown>) => {
+    p.skus = raw.skus.map((sku: Record<string, unknown>, index: number) => {
       const s: Record<string, string> = {};
       for (const key of ['spec', 'group', 'single', 'stock']) {
         if (typeof sku[key] !== 'string' || sku[key].length > 200)
@@ -61,6 +62,15 @@ export function sanitizeProducts(store: Store, input: unknown): Product[] {
         s[key] = value.trim();
       }
       if (s.image && !safeImageName(s.image)) throw new Error('规格图片文件名无效');
+      if (sku.rim != null) {
+        if (
+          typeof sku.rim !== 'string' ||
+          sku.rim.length > 50 ||
+          (sku.rim.trim() && !RIM_OPTIONS.includes(sku.rim.trim()))
+        )
+          throw new Error(`第 ${index + 1} 行规格的轮辋直径不在后台选项里`);
+        if (sku.rim.trim()) s.rim = sku.rim.trim();
+      }
       const options = sku.options ?? [];
       if (!Array.isArray(options) || options.length > 2) throw new Error('最多两种规格类型');
       const sanitizedOptions = options.map((o) => {
@@ -94,14 +104,19 @@ export function sanitizeProducts(store: Store, input: unknown): Product[] {
     });
     if (raw.services != null && (typeof raw.services !== 'object' || Array.isArray(raw.services)))
       throw new Error('服务与承诺设置不正确');
-    const services = { sevenDay: '按平台规则', invoice: '否', authenticity: '否', ...raw.services };
+    // 缺省就是「未读取」：不能默认填成「否」，否则运营以为是自己填的。
+    const services = { sevenDay: '', invoice: '', authenticity: '', ...raw.services };
     p.services = { sevenDay: '', invoice: '', authenticity: '' };
+    const serviceLabels: Record<string, string> = {
+      sevenDay: '7天无理由退货',
+      invoice: '正品发票',
+      authenticity: '假一赔十',
+    };
     for (const key of ['sevenDay', 'invoice', 'authenticity'] as const) {
-      if (
-        !['是', '否', '按平台规则'].includes(services[key]) &&
-        !(p.source.startsWith('拼多多采集：') && services[key] === '')
-      )
-        throw new Error('服务与承诺设置不正确');
+      // 留空是合法值（表示「按类目规则取默认」）。以前只允许拼多多采集来源留空，
+      // 于是普通 Excel 里空着这三项能导入却存不进去，保存一步才报错。
+      if (services[key] !== '' && !['是', '否', '按平台规则'].includes(services[key]))
+        throw new Error(`服务与承诺设置不正确：${serviceLabels[key]}`);
       p.services[key] = services[key];
     }
     for (const key of ['main', 'detail'] as const) {
@@ -122,6 +137,52 @@ export function sanitizeProducts(store: Store, input: unknown): Product[] {
         const id = raw.images?.[sku.image]?.id;
         if (id && assets.has(id)) p.images[sku.image] = { ...assets.get(id)!, name: sku.image };
       }
+    // 到店安装、淘宝发品设置与淘宝专有图片位都必须原样存回，
+    // 否则用户保存一次资料就要重新勾一次到店安装、重填一次轮辋直径。
+    if (raw.install != null) {
+      const install = raw.install as Record<string, unknown>;
+      if (
+        typeof install !== 'object' ||
+        Array.isArray(install) ||
+        (install.delivery !== 'store' && install.delivery !== 'home') ||
+        typeof install.template !== 'string' ||
+        install.template.length > 200
+      )
+        throw new Error('到店安装设置不正确');
+      p.install = {
+        delivery: install.delivery as 'store' | 'home',
+        template: install.template.trim(),
+      };
+    }
+    if (raw.taobao != null) {
+      const taobao = raw.taobao as Record<string, unknown>;
+      if (typeof taobao !== 'object' || Array.isArray(taobao))
+        throw new Error('淘宝发品设置不正确');
+      const listing: Record<string, string> = {};
+      for (const key of [
+        'originProvince',
+        'originCity',
+        'extractWay',
+        'freightBearer',
+        'deliveryTime',
+        'shelfTime',
+        'auctionPoint',
+      ] as const) {
+        const value = taobao[key] ?? '';
+        if (typeof value !== 'string' || value.length > 200) throw new Error('淘宝发品设置不正确');
+        listing[key] = value.trim();
+      }
+      p.taobao = listing as NonNullable<Product['taobao']>;
+    }
+    for (const key of ['threeToFour', 'whiteBg', 'usp'] as const) {
+      if (raw[key] === undefined) continue;
+      const names = raw[key];
+      if (!Array.isArray(names) || names.some((name: unknown) => !safeImageName(name)))
+        throw new Error('图片文件名无效');
+      p[key] = [...(names as string[])];
+    }
+    if (typeof raw.outerId === 'string' && raw.outerId.length <= 200)
+      p.outerId = raw.outerId.trim();
     p.demo = raw.demo === true;
     p.demoDeclared = raw.demoDeclared === true;
     p.savedAt = new Date().toISOString();
