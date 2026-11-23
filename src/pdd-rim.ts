@@ -49,8 +49,8 @@ export function rimDiameterLabelOf(inches: number, kind: TireKind = 'normal'): s
 }
 
 /** 后台下拉里全部 27 个合法选项，顺序与页面一致（普通 / 防爆胎 / 雪地胎）。 */
-export const RIM_OPTIONS: readonly string[] = (['normal', 'runflat', 'snow'] as const).flatMap((kind) =>
-  [13, 14, 15, 16, 17, 18, 19, 20, 21].map((inches) => rimDiameterLabelOf(inches, kind)),
+export const RIM_OPTIONS: readonly string[] = (['normal', 'runflat', 'snow'] as const).flatMap(
+  (kind) => [13, 14, 15, 16, 17, 18, 19, 20, 21].map((inches) => rimDiameterLabelOf(inches, kind)),
 );
 
 const RIM_OPTION_SET = new Set(RIM_OPTIONS);
@@ -62,14 +62,17 @@ const RIM_LOOSE = /^(防爆胎|雪地胎)?\s*(?:r)?\s*(\d{1,2})\s*(?:英寸|寸|
  * 规范成后台选项文案；不是合法选项返回 undefined。
  */
 export function rimOptionLabel(text: string): string | undefined {
-  const source = String(text ?? '').replace(/\s+/g, ' ').trim();
+  const source = String(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!source) return undefined;
   if (RIM_OPTION_SET.has(source)) return source;
   const match = RIM_LOOSE.exec(source);
   if (!match) return undefined;
   const inches = Number(match[2]);
   if (!Number.isInteger(inches) || inches <= 0) return undefined;
-  const kind: TireKind = match[1] === '防爆胎' ? 'runflat' : match[1] === '雪地胎' ? 'snow' : 'normal';
+  const kind: TireKind =
+    match[1] === '防爆胎' ? 'runflat' : match[1] === '雪地胎' ? 'snow' : 'normal';
   const label = rimDiameterLabelOf(inches, kind);
   return RIM_OPTION_SET.has(label) ? label : undefined;
 }

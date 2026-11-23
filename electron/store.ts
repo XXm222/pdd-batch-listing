@@ -110,14 +110,13 @@ export class Store {
       userId: anchor.userId,
       boundAt: new Date().toISOString(),
     };
-    this.transaction(() => this.db.run('UPDATE shops SET json=? WHERE id=?', [JSON.stringify(next), id]));
+    this.transaction(() =>
+      this.db.run('UPDATE shops SET json=? WHERE id=?', [JSON.stringify(next), id]),
+    );
     return next;
   }
   /** 记住这家店的到店安装模板：只动这一个字段，账号与绑定都不碰。 */
-  bindInstallTemplate(
-    shopId: string,
-    template: { id: string; label: string },
-  ): Shop | undefined {
+  bindInstallTemplate(shopId: string, template: { id: string; label: string }): Shop | undefined {
     const shop = this.all<Shop>('shops').find((s) => s.id === shopId);
     if (!shop) return undefined;
     if (shop.installTemplate?.id === template.id && shop.installTemplate?.label === template.label)
@@ -128,7 +127,8 @@ export class Store {
     );
     return next;
   }
-  saveAssets(assets: Asset[]) {    this.transaction(() => {
+  saveAssets(assets: Asset[]) {
+    this.transaction(() => {
       for (const a of assets)
         this.db.run('INSERT OR IGNORE INTO assets(id,json) VALUES (?,?)', [
           a.id,

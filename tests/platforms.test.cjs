@@ -64,8 +64,14 @@ test('店铺名称手填优先，拼多多留空时按「店铺名:子账号」�
   assert.equal(resolveShopName('手填名称', 'demo_operator', true, 'pdd'), '手填名称');
   assert.equal(resolveShopName('邓禄普黑豆专卖店', '邓禄普:珠珠', true, 'pdd'), '邓禄普黑豆专卖店');
   // 主账号（手机号 / 数字 ID）推导不出店名，留空即报错要求手填。
-  assert.throws(() => resolveShopName('', 'demo_operator', true, 'pdd'), /请填写与后台一致的店铺名称/);
-  assert.throws(() => resolveShopName('', '13812345678', true, 'pdd'), /请填写与后台一致的店铺名称/);
+  assert.throws(
+    () => resolveShopName('', 'demo_operator', true, 'pdd'),
+    /请填写与后台一致的店铺名称/,
+  );
+  assert.throws(
+    () => resolveShopName('', '13812345678', true, 'pdd'),
+    /请填写与后台一致的店铺名称/,
+  );
 
   assert.equal(resolveShopName('  Mandla旗舰店  ', '会员名', true, 'taobao'), 'Mandla旗舰店');
   assert.equal(resolveShopName('Mandla旗舰店', '会员名', false, 'taobao'), 'Mandla旗舰店');

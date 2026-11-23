@@ -47,7 +47,7 @@
     "appId": "com.goodsworkspace.desktop",
     "productName": "商品运营台",
     "directories": {
-      "output": "release/0.1.64"
+      "output": "release/0.1.65"
     },
     "files": [
       "dist/**",

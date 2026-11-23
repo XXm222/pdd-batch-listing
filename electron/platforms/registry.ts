@@ -30,7 +30,10 @@ export type PlatformRuntime = {
   inspectDiagnosis(task: Task, shop: Shop): Promise<PageFacts>;
   recoverPage(task: Task, shop: Shop, action: PageRecovery): Promise<RecoveryResult>;
   /** 读后台可选的到店安装模板；给了 editUrl 就先让桥接打开那个编辑页。 */
-  installTemplates?(shop: Shop, editUrls?: string | string[]): Promise<{ label: string; value: string }[]>;
+  installTemplates?(
+    shop: Shop,
+    editUrls?: string | string[],
+  ): Promise<{ label: string; value: string }[]>;
 };
 
 export class PlatformRegistry {

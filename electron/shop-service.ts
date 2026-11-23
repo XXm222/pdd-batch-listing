@@ -1,6 +1,11 @@
 import { Store } from './store';
 import { resolveShopName } from '../src/domain';
-import { accountKey, derivableShopName, isMaskedAccount, normalizePddAccount } from '../src/shop-account';
+import {
+  accountKey,
+  derivableShopName,
+  isMaskedAccount,
+  normalizePddAccount,
+} from '../src/shop-account';
 import { accountKind as pddAccountKind } from '../src/shop-account';
 import {
   DEFAULT_PLATFORM,
@@ -31,8 +36,7 @@ export class ShopService {
     const account = normalizePddAccount(raw.account);
     if (!account || account.length > 100 || raw.password.length > 256)
       throw new Error('请填写有效的账号及密码');
-    if (isMaskedAccount(account))
-      throw new Error('登录账号含掩码字符，请填写可登录的完整账号');
+    if (isMaskedAccount(account)) throw new Error('登录账号含掩码字符，请填写可登录的完整账号');
     if (raw.id && !uuid.test(raw.id)) throw new Error('店铺标识无效');
     if (raw.id && this.isBusy(raw.id))
       throw new Error('该店铺正在执行任务，请暂停并等待任务结束后再修改');
@@ -45,7 +49,13 @@ export class ShopService {
         ? normalizePlatform(existing.platform)
         : DEFAULT_PLATFORM;
     requireEnabledPlatform(platform);
-    const name = resolveShopName(raw.name, account, !existing, platform, derivableShopName(account));
+    const name = resolveShopName(
+      raw.name,
+      account,
+      !existing,
+      platform,
+      derivableShopName(account),
+    );
     if (!platformMeta(platform).allowsSubAccount && account.includes(':'))
       throw new Error(
         `${platformMeta(platform).label}登录账号请填写会员名或手机号，不要使用“店铺名:子账号”格式`,

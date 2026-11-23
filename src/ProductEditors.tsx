@@ -110,7 +110,8 @@ export function SkuEditor({
       {zeroStock.length ? (
         <div className="sku-bulk" role="status">
           <span>
-            {zeroStock.length} 个组合的库存是 0 或空。后台「*库存」是必填，0 在编辑页里等于没填，提交会被拦。
+            {zeroStock.length} 个组合的库存是 0 或空。后台「*库存」是必填，0
+            在编辑页里等于没填，提交会被拦。
           </span>
           <button
             type="button"
