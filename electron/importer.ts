@@ -376,7 +376,7 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
             ? rimOptionLabel(explicitRim) ||
               (() => {
                 throw new Error(
-                  `第${i + 1}行规格的轮辋直径「${explicitRim}」不是后台可选项，请填 14~20 英寸或后台下拉里的原文`,
+                  `第${i + 1}行规格的轮辋直径「${explicitRim}」不是后台可选项，请填后台下拉里的原文，如 17英寸、防爆胎18英寸、21英寸及以上`,
                 );
               })()
             : rimDiameterLabel(options.map((o) => o.value).join(' '), p.title);
