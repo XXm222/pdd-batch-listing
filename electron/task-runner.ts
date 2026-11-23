@@ -43,9 +43,10 @@ export function prepareTasks(
   // 资料里没填模板、或填的还是名字时，用店铺记住的那个模板 ID：
   // 运营只在界面上选一次，之后不用再输 SIST_。资料里明确写了 SIST_ 就以资料为准。
   const withDefaults = (product: Product): Product => {
+    // 商品自己填了模板（名称或 SIST_ ID）就以商品为准，店铺默认值只在留空时补。
+    if (!product.install || product.install.template.trim()) return product;
     const template = shop.installTemplate?.id;
-    if (!template || !product.install) return product;
-    if (product.install.template.trim().startsWith('SIST_')) return product;
+    if (!template) return product;
     return { ...product, install: { ...product.install, template } };
   };
   const tasks: Task[] = selected.map((p) => ({

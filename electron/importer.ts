@@ -44,14 +44,15 @@ function text(value: any): string {
   return '';
 }
 // 运营常用公式算价（如单买价 = 拼单价/0.99），Excel 缓存值会留一长串小数；
-// 后台只收两位小数，这里统一四舍五入，避免 53 行规格整批被「最多两位小数」挡回。
+// 后台只收两位小数：本来就合规的报价（39.9 / 49.99）原样保留，
+// 只有公式缓存超过两位时才四舍五入到两位，改过的值在核对界面里能看到。
 function money(value: string): string {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
+  if (/^\d+(?:\.\d{1,2})?$/.test(raw)) return raw;
   const number = Number(raw);
   if (!Number.isFinite(number)) return raw;
-  // 商家一律用整数报价，运营表里的公式值（拼单价/0.99）只当计算中间结果。
-  return String(Math.round(number));
+  return String(Math.round(number * 100 + Number.EPSILON) / 100);
 }
 const list = (value: any): any[] =>
   value === undefined || value === null || value === ''
@@ -412,7 +413,10 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
         };
       const attributeIndex = info.findIndex((row) => row[0] === '属性名称' && row[1] === '填写值');
       if (attributeIndex >= 0) {
-        const extra = info.slice(attributeIndex + 1).filter((row) => row.slice(0, 3).some(Boolean));
+        const extra = info
+          .slice(attributeIndex + 1)
+          // 「采集来源」是字段行，不算类目属性（导出的表里它排在属性区之后）。
+          .filter((row) => row[0] !== '采集来源' && row.slice(0, 3).some(Boolean));
         if (extra.length > 50) throw new Error('其他类目属性最多 50 项');
         p.attributes = extra.map((row) => {
           if (row[2] && !['是', '否'].includes(row[2]))

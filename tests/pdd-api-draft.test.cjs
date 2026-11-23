@@ -295,13 +295,17 @@ function livePage(options = {}) {
   const sandbox = {
     location: { origin: 'https://mms.pinduoduo.com' },
     document: { querySelector: (selector) => (selector === 'header' ? header : null) },
-    localStorage: { getItem: (key) => (key === 'new_userinfo' && userinfo ? JSON.stringify(userinfo) : null) },
+    localStorage: {
+      getItem: (key) => (key === 'new_userinfo' && userinfo ? JSON.stringify(userinfo) : null),
+    },
     window: {
       __mms: {
         fetch: {
           get: async (route, body) => {
             calls.push([route, body]);
-            return { cat_info_v2_lists: [{ optional: true, cat_name_1: '末级类目', cat_id_1: 101 }] };
+            return {
+              cat_info_v2_lists: [{ optional: true, cat_name_1: '末级类目', cat_id_1: 101 }],
+            };
           },
           post: async () => ({}),
         },
@@ -315,7 +319,14 @@ function livePage(options = {}) {
 const runApi = async (shop, options) => {
   const { sandbox, calls } = livePage(options);
   const result = await vm.runInNewContext(
-    pageApiScript({ route: '/vodka/v2/mms/search/categories/v2', method: 'get', body: { keyword: '乘用车轮胎' } }, shop),
+    pageApiScript(
+      {
+        route: '/vodka/v2/mms/search/categories/v2',
+        method: 'get',
+        body: { keyword: '乘用车轮胎' },
+      },
+      shop,
+    ),
     sandbox,
   );
   return { result, calls };
@@ -337,7 +348,12 @@ test('类目接口不会为别的子账号放行，绑定编号不符时同样�
   assert.equal(other.result.identity, true);
   assert.equal(other.calls.length, 0);
 
-  const bound = { name: '邓禄普黑豆专卖店', account: '邓禄普:珠珠', mallId: 549046886, userId: 190551753 };
+  const bound = {
+    name: '邓禄普黑豆专卖店',
+    account: '邓禄普:珠珠',
+    mallId: 549046886,
+    userId: 190551753,
+  };
   assert.equal((await runApi(bound)).result.ok, true);
   const stranger = await runApi(bound, { userId: 190551754 });
   assert.equal(stranger.result.ok, false);
@@ -353,14 +369,29 @@ test('类目不提供正品发票时资料填“是”按不勾选执行，不�
     allow_invoice_sub_type: false,
     must_set_invoice: false,
   };
-  assert.equal(JSON.stringify(apiInvoice(true, tire)), JSON.stringify({ invoice: 0, offers: false }));
-  assert.equal(JSON.stringify(apiInvoice(false, tire)), JSON.stringify({ invoice: 0, offers: false }));
+  assert.equal(
+    JSON.stringify(apiInvoice(true, tire)),
+    JSON.stringify({ invoice: 0, offers: false }),
+  );
+  assert.equal(
+    JSON.stringify(apiInvoice(false, tire)),
+    JSON.stringify({ invoice: 0, offers: false }),
+  );
 });
 
 test('类目提供发票服务时资料填“是”仍拒绝静默设置发票类型', () => {
-  assert.equal(JSON.stringify(apiInvoice(true, { authentic_invoice: true })), JSON.stringify({ invoice: 1, offers: true }));
-  assert.equal(JSON.stringify(apiInvoice(true, { is_electronic_invoice: true })), JSON.stringify({ invoice: 1, offers: true }));
-  assert.equal(JSON.stringify(apiInvoice(false, { authentic_invoice: true })), JSON.stringify({ invoice: 0, offers: true }));
+  assert.equal(
+    JSON.stringify(apiInvoice(true, { authentic_invoice: true })),
+    JSON.stringify({ invoice: 1, offers: true }),
+  );
+  assert.equal(
+    JSON.stringify(apiInvoice(true, { is_electronic_invoice: true })),
+    JSON.stringify({ invoice: 1, offers: true }),
+  );
+  assert.equal(
+    JSON.stringify(apiInvoice(false, { authentic_invoice: true })),
+    JSON.stringify({ invoice: 0, offers: true }),
+  );
 });
 
 test('发票规则的数组写法与缺省键不会被当成已提供', () => {
@@ -375,9 +406,12 @@ test('到店安装：模板 ID 写进 srv_template_id_map，键按安装类型�
   assert.equal(apiInstallType('home'), '3');
   assert.equal(
     JSON.stringify(apiInstallPair('store', 'SIST_418714932725772662')),
-    JSON.stringify({ '2': 'SIST_418714932725772662' }),
+    JSON.stringify({ 2: 'SIST_418714932725772662' }),
   );
-  assert.equal(JSON.stringify(apiInstallPair('home', ' SIST_abc-1 ')), JSON.stringify({ '3': 'SIST_abc-1' }));
+  assert.equal(
+    JSON.stringify(apiInstallPair('home', ' SIST_abc-1 ')),
+    JSON.stringify({ 3: 'SIST_abc-1' }),
+  );
 });
 
 test('到店安装：还没换成模板 ID 时明确拒绝', () => {
@@ -396,7 +430,9 @@ test('到店安装：填中文模板名时从下拉项里把模板 ID 挖出来'
   });
   const run = async (name, labels) => {
     const items = labels.map(([label, value]) => option(label, value));
-    const headers = [{ click() {}, parentElement: { parentElement: { innerText: '配送到店模板' } } }];
+    const headers = [
+      { click() {}, parentElement: { parentElement: { innerText: '配送到店模板' } } },
+    ];
     const sandbox = {
       document: {
         getElementById: () => null,
@@ -440,8 +476,15 @@ test('到店安装：老资料没算轮辋直径时按规格选项与标题自�
     skus: [{ options: [{ name: '型号', value: '205/45R17 88W XL SPORT MAXX LUX SC' }] }],
   };
   assert.equal(apiRim(product, product.skus[0]), '17英寸', '规格里没写直径时也要能推出来');
-  assert.equal(apiRim({ ...product, install: undefined }, product.skus[0]), '', '没开到店安装就不写这一项');
-  assert.equal(apiRim(product, { options: [{ name: '型号', value: '245/40R19 防爆胎' }] }), '防爆胎19英寸');
+  assert.equal(
+    apiRim({ ...product, install: undefined }, product.skus[0]),
+    '',
+    '没开到店安装就不写这一项',
+  );
+  assert.equal(
+    apiRim(product, { options: [{ name: '型号', value: '245/40R19 防爆胎' }] }),
+    '防爆胎19英寸',
+  );
   assert.equal(apiRim(product, { rim: '20英寸', options: [] }), '20英寸', '导入时算好的直接用');
 });
 test('到店安装：面板没展开、复选框没勾时自动展开勾选再取模板', async () => {
@@ -590,12 +633,66 @@ test('到店安装：按真实页面结构（更多服务分组 + bottom-switch�
     Promise,
   };
   const read = vm.runInNewContext(`(${PDD_TEMPLATE_OPTIONS.toString()})`, sandbox);
-  const result = await read();
+  const unchecked = await read();
   assert.equal(clicked.length, 1, '先点分组里的 bottom-switch 展开「更多服务」');
-  assert.equal(checked, true, '没勾时自动勾上「到店安装」');
+  assert.equal(checked, false, '只读：不会替运营勾「到店安装」');
+  assert.equal(unchecked.ok, false);
+  assert.match(unchecked.reason, /只读/);
+  checked = true;
+  const result = await read();
+  assert.equal(checked, true);
   assert.equal(result.ok, true);
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(result.options)),
-    [{ label: '到店模版1', value: 'SIST_real_1' }],
+  assert.deepEqual(JSON.parse(JSON.stringify(result.options)), [
+    { label: '到店模版1', value: 'SIST_real_1' },
+  ]);
+});
+
+test('草稿读回：安装类型、模板与每个 SKU 的轮辋直径缺一项都判不一致', () => {
+  const { apiInstallMatches } = require('../dist-electron/electron/platforms/pdd-api-draft.js');
+  const product = {
+    code: 'READBACK',
+    title: '邓禄普轮胎 205/45R17',
+    install: { delivery: 'store', template: 'SIST_real_1' },
+    skus: [
+      { spec: '205/45R17', group: '30', single: '40', stock: '1', rim: '17英寸' },
+      { spec: '225/50R18', group: '30', single: '40', stock: '1', rim: '18英寸' },
+    ],
+  };
+  const good = {
+    srv_template_id_map: { 2: 'SIST_real_1' },
+    sku: [
+      { sku_srv_templates: '{"rimDiameter":"17英寸"}' },
+      { sku_srv_templates: '{"rimDiameter":"18英寸"}' },
+    ],
+  };
+  assert.equal(apiInstallMatches(product, good, 'SIST_real_1'), true);
+  assert.equal(apiInstallMatches(product, {}, 'SIST_real_1'), false, '缺模板');
+  assert.equal(
+    apiInstallMatches(
+      product,
+      { ...good, srv_template_id_map: { 2: 'SIST_other' } },
+      'SIST_real_1',
+    ),
+    false,
+    '模板不是商品指定的那个',
+  );
+  assert.equal(
+    apiInstallMatches(product, { ...good, sku: good.sku.slice(0, 1) }, 'SIST_real_1'),
+    false,
+    'SKU 数量对不上',
+  );
+  assert.equal(
+    apiInstallMatches(
+      product,
+      { ...good, sku: [good.sku[0], { sku_srv_templates: '{}' }] },
+      'SIST_real_1',
+    ),
+    false,
+    '第二个 SKU 没写轮辋直径',
+  );
+  assert.equal(
+    apiInstallMatches({ ...product, install: undefined }, {}, undefined),
+    true,
+    '没开到店安装就不比',
   );
 });

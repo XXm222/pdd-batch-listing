@@ -366,7 +366,14 @@ test('a real-name suffix on the subaccount does not hide a correctly signed-in i
   assert.equal(matchesPddIdentity(liveNames, liveShop), true);
   assert.equal(
     isPddLoginConfirmed(
-      { trusted: true, names: liveNames, loginPage: false, form: false, rejected: false, challenge: false },
+      {
+        trusted: true,
+        names: liveNames,
+        loginPage: false,
+        form: false,
+        rejected: false,
+        challenge: false,
+      },
       liveShop,
     ),
     true,
@@ -376,7 +383,14 @@ test('a real-name suffix on the subaccount does not hide a correctly signed-in i
   assert.equal(pageMatch(liveNames, liveShop), true);
   assert.equal(
     pageConfirm(
-      { trusted: true, names: liveNames, loginPage: false, form: false, rejected: false, challenge: false },
+      {
+        trusted: true,
+        names: liveNames,
+        loginPage: false,
+        form: false,
+        rejected: false,
+        challenge: false,
+      },
       liveShop,
     ),
     true,
@@ -538,7 +552,9 @@ test('a different backend account under a plausible header is a binding mismatch
     ...readState(`${boundShop.name}\n邓禄普:阿珍(李珍)\n退出当前账号`, null),
     anchor: { ...liveAnchor, userId: 190551754 },
   });
-  await assert.rejects(f.login.run(boundShop, 'check'), (error) => /绑定不一致/.test(error.message));
+  await assert.rejects(f.login.run(boundShop, 'check'), (error) =>
+    /绑定不一致/.test(error.message),
+  );
   assert.equal(f.decrypts(), 0);
   assert.deepEqual(f.calls, []);
 });
@@ -546,9 +562,8 @@ test('a different backend account under a plausible header is a binding mismatch
 test('an unbound shop never trusts the page anchor and keeps the text rules', async () => {
   const unbound = { name: boundShop.name, account: boundShop.account };
   const f = fixture(signedInOnly());
-  await assert.rejects(
-    f.login.run(unbound, 'check'),
-    (error) => /店铺与账号信息未完整读取/.test(error.message),
+  await assert.rejects(f.login.run(unbound, 'check'), (error) =>
+    /店铺与账号信息未完整读取/.test(error.message),
   );
   assert.equal(f.decrypts(), 0);
 });
@@ -602,4 +617,22 @@ test('the page guards read and prefer the structured identity inside the browser
     username: '邓禄普:珠珠',
     mallName: '邓禄普黑豆专卖店',
   });
+});
+
+test('切店只绑定最终核对成功的那次编号，新页面编号还没加载就不绑定', async () => {
+  const f = fixture({
+    signedIn: true,
+    loginPage: false,
+    names: [shop.name, shop.account, '退出当前账号'],
+    anchor: {},
+  });
+  f.state.anchor = { mallId: 549046886, userId: 190551753 };
+  await f.login.run(shop);
+  assert.deepEqual(f.login.anchor, { mallId: 549046886, userId: 190551753 });
+
+  const other = { name: '另一家店', account: '另一家店:运营', mallId: 111111, userId: 222222 };
+  f.state.names = [other.name, other.account, '退出当前账号'];
+  f.state.anchor = {};
+  await f.login.run(other);
+  assert.equal(f.login.anchor, undefined, '新页面编号未加载时不沿用上一家店的绑定');
 });

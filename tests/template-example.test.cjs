@@ -26,8 +26,8 @@ test('blank download stays empty and separate example includes two complete SKUs
     assert.deepEqual(
       p.skus.map((s) => [s.options[0].value, s.group, s.single, s.stock]),
       [
-        ['10L', '40', '50', '10'],
-        ['20L', '50', '60', '8'],
+        ['10L', '39.9', '49.9', '10'],
+        ['20L', '49.9', '59.9', '8'],
       ],
     );
     assert.equal(p.main.length, 1);

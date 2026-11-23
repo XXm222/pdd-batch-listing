@@ -20,6 +20,35 @@ export const apiRim = (product: Product, sku: Product['skus'][number]): string =
   if (sku.rim) return sku.rim;
   return rimDiameterLabel(...(sku.options || []).map((o) => o.value), product.title) || '';
 };
+/**
+ * 读回时逐项核对安装设置：安装类型对应的模板 ID 必须写进去，
+ * 且每个 SKU 的轮辋直径都要在 `sku_srv_templates` 里出现；
+ * 以前只看售后承诺，安装整块丢了也会判定成功。
+ */
+export const apiInstallMatches = (
+  product: Product,
+  detail: Row,
+  resolvedTemplate?: string,
+): boolean => {
+  if (!product.install) return true;
+  const key = apiInstallType(product.install.delivery);
+  const map = (detail.srv_template_id_map || {}) as Record<string, unknown>;
+  const saved = String(map[key] ?? '').trim();
+  if (!saved) return false;
+  const typed = String(product.install.template || '').trim();
+  const want = String(resolvedTemplate || '').trim() || (/^SIST_/.test(typed) ? typed : '');
+  if (want && saved !== want) return false;
+  const skus = Array.isArray(detail.sku) ? (detail.sku as Row[]) : [];
+  if (skus.length !== product.skus.length) return false;
+  for (const [index, sku] of product.skus.entries()) {
+    const rim = apiRim(product, sku);
+    if (!rim) return false;
+    const raw = skus[index]?.sku_srv_templates;
+    const text = typeof raw === 'string' ? raw : raw ? JSON.stringify(raw) : '';
+    if (!text.includes(rim)) return false;
+  }
+  return true;
+};
 type Services = { refund: number; invoice: number; authenticity: number };
 // 页面守卫的输入形状：与主进程 LoginEvidence 一致，注入后由 PDD_LOGIN_MATCH 判定。
 type GuardState = {
@@ -318,8 +347,7 @@ export const PDD_TEMPLATE_OPTIONS = () =>
       }
       return false;
     };
-    // 读模板时会替运营勾上「到店安装」，读完要还原，不然页面停在脏状态（草稿未保存也一样碍眼）。
-    let toggledInstall = false;
+    // 只读：不替运营勾「到店安装」（勾选等于替它同意服务条款，也会把编辑页改成脏状态）。
     let box = findBox();
     if (!box) {
       await expandServices();
@@ -332,15 +360,13 @@ export const PDD_TEMPLATE_OPTIONS = () =>
         await waitFor(() => Boolean(installCheckbox()), 2000);
         input = installCheckbox();
       }
-      if (input) {
-        if (!input.checked) {
-          const host = input.closest('label') || input;
-          await press(host as HTMLElement);
-          toggledInstall = true;
-          await waitFor(() => Boolean(findBox()), 3000);
-        }
-        box = findBox();
-      }
+      return {
+        ok: false as const,
+        options: [],
+        reason: input
+          ? '页面还没勾选「到店安装」，这里只读、不会替你勾选；请先在后台勾选并保存，再读取模板'
+          : '页面里找不到「到店安装」勾选项，请先确认停在目标店铺的商品编辑页',
+      };
     }
     const header =
       (box && box.querySelector('[data-testid="beast-core-select-header"]')) ||
@@ -370,10 +396,6 @@ export const PDD_TEMPLATE_OPTIONS = () =>
       if (found) seen.set(found.value, found.label);
     }
     (header as HTMLElement).click();
-    if (toggledInstall) {
-      const back = installCheckbox();
-      if (back && back.checked) await press(back.closest('label') || back);
-    }
     const options = [...seen.entries()].map(([value, label]) => ({ value, label }));
     return options.length
       ? { ok: true as const, options }
@@ -1217,6 +1239,11 @@ export class PddApiDraft {
               d.invoice_status === state.services!.invoice &&
               d.is_folt === state.services!.authenticity,
             '售后承诺',
+          ],
+          [
+            'install',
+            apiInstallMatches(p, d as Row, state.installTemplateId),
+            '到店安装类型、模板与轮辋直径',
           ],
           [
             'discount',

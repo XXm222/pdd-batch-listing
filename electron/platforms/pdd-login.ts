@@ -108,7 +108,8 @@ export const shopIdentityMessage = (shop: Pick<Shop, 'name' | 'account'>) =>
 
 export class PddLogin {
   private lastState?: LoginState;
-  private lastAnchor?: PddAnchor;
+  /** 同一次「核对通过」状态里同时带齐的后台编号；没带齐就留空，不拿旧值顶上。 */
+  private verifiedAnchor?: PddAnchor;
   constructor(
     private bridge: Bridge,
     private decrypt: (shop: Shop) => Promise<string>,
@@ -142,13 +143,16 @@ export class PddLogin {
   private async state() {
     this.guard();
     const raw = await this.bridge.eval<LoginState & { anchor?: unknown }>(LOGIN_STATE, 5000);
+    // 只记录「这一次读到」的结构化身份；切店过程中上一家店的编号不能留到下一家店。
     const anchor = readPddAnchor(raw?.anchor);
-    if (anchor) this.lastAnchor = anchor;
     return (this.lastState = { ...raw, anchor });
   }
-  /** 最近一次确认到的后台结构化身份；`run` 成功后用于回填店铺绑定。 */
+  /**
+   * 本次核对**通过的那一刻**读到的完整后台身份（mall_id + 用户 id）。
+   * 只在同一次状态既通过核对、又带齐两个编号时才写入，切店途中不会残留上一家店的值。
+   */
   get anchor(): PddAnchor | undefined {
-    return this.lastAnchor;
+    return this.verifiedAnchor;
   }
   private async trusted() {
     if (!(await this.state()).trusted)
@@ -199,6 +203,11 @@ export class PddLogin {
     if (isPddLoginConfirmed(result, shop)) {
       if (!SAME_SHOP(result, shop))
         throw new ShopLoginError('failed', identityProblem(result, shop), result.structure);
+      // 只有「这一次通过核对」的状态里同时带齐两个编号，才允许回填店铺绑定；
+      // 少一个就留空，主进程不会写入半套身份，也不会沿用上一家店的值。
+      const anchor = result.anchor;
+      if (anchor && typeof anchor.mallId === 'number' && typeof anchor.userId === 'number')
+        this.verifiedAnchor = { mallId: anchor.mallId, userId: anchor.userId };
       return;
     }
     if (result.rejected)
@@ -213,6 +222,7 @@ export class PddLogin {
   }
   async run(shop: Shop, mode: 'reuse' | 'relogin' | 'check' = 'reuse') {
     this.lastState = undefined;
+    this.verifiedAnchor = undefined;
     if (mode === 'check') {
       await this.step(shop.account.includes(':') ? '核对店铺与登录账号' : '核对后台店铺', () =>
         this.verify(shop),
@@ -233,8 +243,7 @@ export class PddLogin {
       ),
     );
     const confirmed =
-      isPddLoginConfirmed(initial, shop) ||
-      pddAnchorVerdict(initial.anchor, shop) === 'mismatch';
+      isPddLoginConfirmed(initial, shop) || pddAnchorVerdict(initial.anchor, shop) === 'mismatch';
     if (mode === 'reuse' && SAME_SHOP(initial, shop)) {
       await this.step(shop.account.includes(':') ? '核对店铺与登录账号' : '核对后台店铺', () =>
         this.verify(shop),

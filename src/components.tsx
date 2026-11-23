@@ -197,16 +197,34 @@ export function Recognition({
    * 这里按「最高单买价 + 10」兜底：只在当前值空着或不高于最高单买价时补，
    * 手填的有效值一律不动。
    */
-  useEffect(() => {
+  /**
+   * 价格与参考价只给建议，绝不自动改数：导入的合法报价（39.9 / 49.99）保持原样，
+   * 运营点按钮才应用，避免「只是打开编辑器」就把商品报价改了。
+   */
+  const priceHint = (() => {
+    const highest = p.skus.reduce((max, sku) => {
+      const value = Number(sku.single);
+      return Number.isFinite(value) && value > max ? value : max;
+    }, 0);
     const needsRound = p.skus.some(
-      (sku) => /\.\d/.test(sku.group || '') || /\.\d/.test(sku.single || ''),
+      (sku) => /\.\d{3,}/.test(sku.group || '') || /\.\d{3,}/.test(sku.single || ''),
     );
-    if (!needsRound) return;
+    const reference = Number(p.reference);
+    const referenceLow = highest > 0 && !(Number.isFinite(reference) && reference > highest);
+    return {
+      needsRound,
+      referenceLow,
+      wantReference: String(Math.ceil(highest) + 10),
+    };
+  })();
+  const roundPrices = () =>
     update((product) => ({
       ...product,
       skus: product.skus.map((sku) => {
-        const group = /\.\d/.test(sku.group || '') ? String(Math.round(Number(sku.group))) : sku.group;
-        const rounded = /\.\d/.test(sku.single || '')
+        const group = /\.\d{3,}/.test(sku.group || '')
+          ? String(Math.round(Number(sku.group)))
+          : sku.group;
+        const rounded = /\.\d{3,}/.test(sku.single || '')
           ? String(Math.ceil(Number(sku.single)))
           : sku.single;
         // 单买价不能低于拼单价，取整撞上了就抬到同一个数。
@@ -214,24 +232,8 @@ export function Recognition({
         return { ...sku, group, single };
       }),
     }));
-  }, [p.skus]);
-  /**
-   * 参考价必须高于所有单买价，后台才收。运营不想每次自己算最贵那档，
-   * 这里按「最高单买价 + 10」兜底：只在当前值空着或不高于最高单买价时补，
-   * 手填的有效值一律不动。
-   */
-  useEffect(() => {
-    const highest = p.skus.reduce((max, sku) => {
-      const value = Number(sku.single);
-      return Number.isFinite(value) && value > max ? value : max;
-    }, 0);
-    if (!highest) return;
-    const reference = Number(p.reference);
-    if (Number.isFinite(reference) && reference > highest) return;
-    const want = String(Math.ceil(highest) + 10);
-    if (p.reference === want) return;
-    update((product) => ({ ...product, reference: want }));
-  }, [p.skus, p.reference]);
+  const applyReference = () =>
+    update((product) => ({ ...product, reference: priceHint.wantReference }));
   const dirty = JSON.stringify(products) !== JSON.stringify(initial);
   const requestClose = () => {
     if (!busy) dirty ? setClosing(true) : onClose();
@@ -706,6 +708,39 @@ export function Recognition({
                     添加规格组合
                   </button>
                 </div>
+                {priceHint.needsRound || priceHint.referenceLow ? (
+                  <div className="price-advice">
+                    <p className="quiet-note">
+                      {priceHint.referenceLow
+                        ? `参考价不高于最高单买价，后台会拒绝提交。建议填 ${priceHint.wantReference}。`
+                        : ''}
+                      {priceHint.needsRound ? ' 有报价超过两位小数，后台只收两位。' : ''}
+                      {' 都不会自动改，点按钮才应用。'}
+                    </p>
+                    <span className="price-advice-actions">
+                      {priceHint.referenceLow ? (
+                        <button
+                          type="button"
+                          className="button"
+                          disabled={busy}
+                          onClick={applyReference}
+                        >
+                          参考价填 {priceHint.wantReference}
+                        </button>
+                      ) : null}
+                      {priceHint.needsRound ? (
+                        <button
+                          type="button"
+                          className="button"
+                          disabled={busy}
+                          onClick={roundPrices}
+                        >
+                          金额取整
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
+                ) : null}
                 {isStructuredProduct(p) ? (
                   <SkuEditor
                     product={p}
@@ -1431,7 +1466,9 @@ export function ShopEditor({
       });
       setForm((f) => ({ ...f, password: '' }));
       // 服务端会把账号归一化，回查必须按归一化键，不能拿原文比。
-      const saved = workspace.shops.find((shop) => accountKey(shop.account) === accountKey(account));
+      const saved = workspace.shops.find(
+        (shop) => accountKey(shop.account) === accountKey(account),
+      );
       if (!saved) throw Error('店铺已保存，请重新打开店铺管理核对');
       await onSaved(saved.id);
       onClose();
@@ -1538,8 +1575,8 @@ export function ShopEditor({
             ) : null}
             {initial?.mallId && initial?.userId ? (
               <p className="quiet-note">
-                已绑定后台店铺 {initial.mallId} · 账号 {initial.userId}；核对时比较这两个编号，不再看页面文字。
-                更换登录账号后需重新登录核对一次。
+                已绑定后台店铺 {initial.mallId} · 账号 {initial.userId}
+                ；核对时比较这两个编号，不再看页面文字。 更换登录账号后需重新登录核对一次。
               </p>
             ) : null}
             <p className="quiet-note">
@@ -1752,10 +1789,7 @@ export const maskAccount = (account: string) =>
  * 这里让人在保存前看见它，必要时就地改。模板名留到执行时换 SIST_ 编号，
  * 解析结果落在 apiDraft.installTemplateId，已经解析过就把编号显示出来。
  */
-function InstallEditor(props: {
-  product: Product;
-  update: (fn: (p: Product) => Product) => void;
-}) {
+function InstallEditor(props: { product: Product; update: (fn: (p: Product) => Product) => void }) {
   const { product, update } = props;
   const taobao = Boolean(product.taobao);
   const install = product.install;
@@ -1772,33 +1806,32 @@ function InstallEditor(props: {
           : {
               ...sku,
               rim:
-                rimDiameterLabel(
-                  ...(sku.options || []).map((option) => option.value),
-                  p.title,
-                ) || "",
+                rimDiameterLabel(...(sku.options || []).map((option) => option.value), p.title) ||
+                '',
             },
       ),
     }));
   }, [taobao, Boolean(install), total, withRim]);
   // 后台模板做成下拉：名字每次都不一样，运营不该记 SIST_ 编号。
   const [templates, setTemplates] = useState<{ label: string; value: string }[]>([]);
-  const [templateNote, setTemplateNote] = useState("");
+  const [templateNote, setTemplateNote] = useState('');
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const readTemplates = async () => {
     setLoadingTemplates(true);
-    setTemplateNote("");
+    setTemplateNote('');
     try {
       const list = await window.desktop.installTemplates(product.id);
       setTemplates(list);
-      if (!list.length) setTemplateNote("后台一个模板也没有，请先到拼多多后台新建到店安装模板。");
+      if (!list.length) setTemplateNote('后台一个模板也没有，请先到拼多多后台新建到店安装模板。');
       else if (list.length === 1) {
         applyTemplate(list[0]);
         setTemplateNote(`后台只有一个模板「${list[0].label}」，已经选上并记到这家店了。`);
-      } else setTemplateNote(`读到 ${list.length} 个模板，选一个就会记到这家店，下次新建商品自动带上。`);
+      } else
+        setTemplateNote(`读到 ${list.length} 个模板，选一个就会记到这家店，下次新建商品自动带上。`);
     } catch (error) {
       // 主进程抛错经 IPC 会被包一层 "Error invoking remote method 'x': Error: ..."，界面上只留原因。
       const text = error instanceof Error ? error.message : String(error);
-      setTemplateNote(text.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, ""));
+      setTemplateNote(text.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, ''));
     } finally {
       setLoadingTemplates(false);
     }
@@ -1807,7 +1840,7 @@ function InstallEditor(props: {
     update((p) => ({
       ...p,
       install: {
-        delivery: p.install?.delivery ?? "store",
+        delivery: p.install?.delivery ?? 'store',
         template: option.value,
       },
     }));
@@ -1816,12 +1849,13 @@ function InstallEditor(props: {
       .catch(() => undefined);
   };
   if (taobao) return null;
-  const patch = (field: "delivery" | "template", value: string) =>
+  const patch = (field: 'delivery' | 'template', value: string) =>
     update((p) => ({
       ...p,
       install: {
-        delivery: field === "delivery" ? (value as "store" | "home") : p.install?.delivery ?? "store",
-        template: field === "template" ? value : p.install?.template ?? "",
+        delivery:
+          field === 'delivery' ? (value as 'store' | 'home') : (p.install?.delivery ?? 'store'),
+        template: field === 'template' ? value : (p.install?.template ?? ''),
       },
     }));
   return (
@@ -1834,7 +1868,7 @@ function InstallEditor(props: {
           <div className="field-grid">
             <label>
               安装类型
-              <select value={install.delivery} onChange={(e) => patch("delivery", e.target.value)}>
+              <select value={install.delivery} onChange={(e) => patch('delivery', e.target.value)}>
                 <option value="store">配送到店</option>
                 <option value="home">配送到家</option>
               </select>
@@ -1846,11 +1880,12 @@ function InstallEditor(props: {
                 onChange={(e) => {
                   const picked = templates.find((option) => option.value === e.target.value);
                   if (picked) applyTemplate(picked);
-                  else patch("template", e.target.value);
+                  else patch('template', e.target.value);
                 }}
               >
                 <option value="">点右边「读取后台模板」再选</option>
-                {install.template && !templates.some((option) => option.value === install.template) ? (
+                {install.template &&
+                !templates.some((option) => option.value === install.template) ? (
                   <option value={install.template}>{install.template}</option>
                 ) : null}
                 {templates.map((option) => (
@@ -1863,10 +1898,12 @@ function InstallEditor(props: {
           </div>
           <div className="install-foot">
             <p className="quiet-note">
-            {withRim < total
-              ? `轮辋直径 ${withRim}/${total} 行已填，缺的行后台会拒绝提交。`
-              : `轮辋直径 ${total} 行齐全。`}
-            {" 执行时按名称到后台下拉里换成 SIST_ 开头模板编号，换不到会停下来告诉你后台有哪些模板。"}
+              {withRim < total
+                ? `轮辋直径 ${withRim}/${total} 行已填，缺的行后台会拒绝提交。`
+                : `轮辋直径 ${total} 行齐全。`}
+              {
+                ' 执行时按名称到后台下拉里换成 SIST_ 开头模板编号，换不到会停下来告诉你后台有哪些模板。'
+              }
             </p>
             <button
               type="button"
@@ -1883,7 +1920,7 @@ function InstallEditor(props: {
                             rimDiameterLabel(
                               ...(sku.options || []).map((option) => option.value),
                               p.title,
-                            ) || "",
+                            ) || '',
                         },
                   ),
                 }))
@@ -1897,7 +1934,7 @@ function InstallEditor(props: {
               disabled={loadingTemplates}
               onClick={() => void readTemplates()}
             >
-              {loadingTemplates ? "读取中…" : "读取后台模板"}
+              {loadingTemplates ? '读取中…' : '读取后台模板'}
             </button>
           </div>
           {templateNote ? <p className="quiet-note">{templateNote}</p> : null}
@@ -1913,7 +1950,7 @@ function InstallEditor(props: {
           <button
             type="button"
             className="button"
-            onClick={() => update((p) => ({ ...p, install: { delivery: "store", template: "" } }))}
+            onClick={() => update((p) => ({ ...p, install: { delivery: 'store', template: '' } }))}
           >
             开启到店安装
           </button>

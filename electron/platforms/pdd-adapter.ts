@@ -23,6 +23,7 @@ import {
   matchesPddIdentity,
   pddAnchorVerdict,
   readPddAnchor,
+  PDD_ANCHOR_READ,
   PDD_IDENTITY_MATCH,
   PDD_LOGIN_CONFIRMED,
   PDD_LOGIN_MATCH,
@@ -499,7 +500,7 @@ export class PddAdapter {
   }
   /** 读后台「配送到店模板」下拉里的模板，给资料界面做成下拉选择。 */
   async installTemplates(
-    _shop: Shop,
+    shop: Shop,
     editUrls: string | string[] = [],
   ): Promise<{ label: string; value: string }[]> {
     await this.bridge.connect();
@@ -534,8 +535,25 @@ export class PddAdapter {
       );
     const firstProblem = (result: Options | undefined) =>
       result?.reason || '没读到后台的到店安装模板';
+    // 串店守门：浏览器里开着的编辑页属于哪家店，必须和目标店铺一致，
+    // 否则会把别家店的模板读回来，甚至读到别家店的服务设置。
+    const assertTargetShop = async () => {
+      const bound = typeof shop.mallId === 'number' && typeof shop.userId === 'number';
+      if (!bound) return;
+      const live = readPddAnchor(await this.bridge.eval<unknown>(PDD_ANCHOR_READ, 5000));
+      const running = live && typeof live.mallId === 'number' && typeof live.userId === 'number';
+      if (!running)
+        throw new NeedsUser(
+          `读不到当前页面的后台身份，无法确认是不是「${shop.name}」。请确认浏览器已登录这家店并停在商品编辑页，再点一次「读取后台模板」。`,
+        );
+      if (live!.mallId !== shop.mallId || live!.userId !== shop.userId)
+        throw new NeedsUser(
+          `浏览器里打开的是另一家店（后台店铺 ID ${live!.mallId}、账号 ID ${live!.userId}），不是「${shop.name}」（${shop.mallId} / ${shop.userId}）。请先在浏览器切到这家店的商品编辑页，再点一次「读取后台模板」。`,
+        );
+    };
 
     if (await onEditPage()) {
+      await assertTargetShop();
       const here = await readOptions();
       if (here?.ok) return here.options || [];
       throw new NeedsUser(
@@ -570,10 +588,13 @@ export class PddAdapter {
           Math.max(1000, remaining()),
           '商品编辑页还没渲染出「服务与承诺」，请检查网络后重试',
         );
+        await assertTargetShop();
         const result = await readOptions();
         if (result?.ok) return result.options || [];
         lastProblem = firstProblem(result);
       } catch (error) {
+        // 串店与身份确认的问题要原样抛给运营，不要被「没读到模板」盖掉。
+        if (error instanceof NeedsUser) throw error;
         lastProblem = error instanceof Error ? error.message : String(error);
       }
     }

@@ -122,6 +122,10 @@ export async function exportProductWorkbook(p: Product, template: string, assets
     假一赔十: p.source.startsWith('拼多多采集：')
       ? (p.services?.authenticity ?? '')
       : p.services?.authenticity || '否',
+    // 到店安装写回模板对应的三行，导回软件时安装设置、类型与模板都还在。
+    到店安装: p.install ? '是' : '否',
+    到店安装类型: p.install ? (p.install.delivery === 'home' ? '配送到家' : '配送到店') : '',
+    到店安装模板: p.install?.template || '',
     发货地省份: p.taobao?.originProvince || '',
     发货地城市: p.taobao?.originCity || '',
     提取方式: p.taobao?.extractWay || '',
@@ -142,13 +146,26 @@ export async function exportProductWorkbook(p: Product, template: string, assets
         ['参考价（元）', '满2件折扣（折）', '返点比例（%）'].includes(label),
       );
   }
-  const attributeStart = taobao ? 26 : 24;
+  // 属性区从模板真正的「属性名称」表头下面一行开始写，不再按固定行号，
+  // 否则新版模板（属性表头在第 26 行）会被上方内容盖掉。
+  const attributeHeader = rows[0].find(
+    (r) => content(array(r.c).find((c) => c['@r'] === `A${r['@r']}`)).trim() === '属性名称',
+  );
+  const attributeStart = attributeHeader ? Number(attributeHeader['@r']) + 1 : taobao ? 26 : 27;
+  // 采集来源：模板留了「采集来源」这一行就写那一行；没有就补在属性区之后一行，
+  // 绝不占用别的字段行（旧实现硬写第 21 行，新版模板那里已是「到店安装类型」）。
+  const sourceRow = rows[0].find(
+    (r) => content(array(r.c).find((c) => c['@r'] === `A${r['@r']}`)).trim() === '采集来源',
+  );
   if (!taobao && p.source.startsWith('拼多多采集：')) {
-    set(0, 21, 0, '采集来源');
-    set(0, 21, 1, p.source);
-    set(0, 21, 2, '自动记录');
-    set(0, 21, 3, '库存为采集时数据。未读取字段留空，重新导入后须补充。');
-    rows[0].find((r) => Number(r['@r']) === 21)['@ht'] = 76;
+    const rowNumber = sourceRow
+      ? Number(sourceRow['@r'])
+      : attributeStart + (p.attributes || []).length;
+    set(0, rowNumber, 0, '采集来源');
+    set(0, rowNumber, 1, p.source);
+    set(0, rowNumber, 2, '自动记录');
+    set(0, rowNumber, 3, '库存为采集时数据。未读取字段留空，重新导入后须补充。');
+    if (sourceRow) sourceRow['@ht'] = 76;
   }
   for (const [i, a] of (p.attributes || []).entries()) {
     set(0, attributeStart + i, 0, a.name);
@@ -189,6 +206,18 @@ export async function exportProductWorkbook(p: Product, template: string, assets
     pictures[sheet].push({ row, col, ...saved });
   };
   if (p.skus.length > 100) throw Error('每件商品最多导出 100 个规格');
+  // 轮辋直径按模板真实表头定位（新版模板在 J 列），表头没这一列就不写。
+  const skuHeader = rows[1].find((r) => Number(r['@r']) === 4);
+  const labelOf = (row: (typeof rows)[number][number], col: number) =>
+    content(
+      array(row.c).find(
+        (c: { '@r'?: string }) => c['@r'] === `${String.fromCharCode(65 + col)}${row['@r']}`,
+      ),
+    ).trim();
+  let rimColumn = -1;
+  if (skuHeader)
+    for (let col = 0; col < 12; col++)
+      if (labelOf(skuHeader, col).startsWith('轮辋直径')) rimColumn = col;
   for (const [i, s] of p.skus.entries()) {
     const values = [
       s.options?.[0]?.name || '',
@@ -209,6 +238,7 @@ export async function exportProductWorkbook(p: Product, template: string, assets
     cells.forEach((v, c) =>
       set(1, i + 5, c, v || '', taobao ? [4, 5].includes(c) : [5, 6, 7].includes(c)),
     );
+    if (rimColumn >= 0) set(1, i + 5, rimColumn, s.rim || '');
     if (s.image) await picture(1, i + 5, taobao ? 6 : 8, s.image);
   }
   const groups = taobao

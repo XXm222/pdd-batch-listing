@@ -17,6 +17,15 @@ test('operator export keeps identifiers, zero stock, image bytes/order and suppo
       p.skus[0].stock = '0';
       p.skus[0].code = '0000456';
       if (p.skus.length > 1) p.skus[1].code = '0000457';
+      if (kind === '商品资料') {
+        p.install = { delivery: 'store', template: '到店模版1' };
+        p.attributes = [
+          { name: '产地', value: '中国大陆' },
+          { name: '使用对象', value: '通用' },
+          { name: '轮胎类型', value: '四季胎' },
+        ];
+        for (const sku of p.skus) sku.rim = '防爆胎18英寸';
+      }
       const file = path.join(dir, `${kind}.xlsx`),
         bytes = await exportProductWorkbook(
           p,
@@ -34,6 +43,17 @@ test('operator export keeps identifiers, zero stock, image bytes/order and suppo
       );
       if (kind === '商品资料') assert.equal(back.skus[0].code, '0000456');
       else assert.deepEqual(back.taobao, p.taobao);
+      if (kind === '商品资料') {
+        assert.deepEqual(back.install, p.install);
+        assert.deepEqual(
+          back.skus.map((s) => s.rim),
+          p.skus.map((s) => s.rim),
+        );
+        assert.deepEqual(
+          (back.attributes || []).map((a) => [a.name, a.value]),
+          p.attributes.map((a) => [a.name, a.value]),
+        );
+      }
       for (const key of ['main', 'detail', 'threeToFour', 'whiteBg', 'usp'])
         assert.deepEqual(
           (back[key] || []).map((n) => back.images[n].id),

@@ -63,7 +63,7 @@ test('原始两页模板可读取，链接不进入商品模型', async () => {
   assert.equal(p.code, 'DEMO-FB-FORM-001');
   assert.equal(p.skuCode, 'DEMO-FB-STD');
   assert.equal(p.skus[0].stock, '10');
-  assert.equal(p.skus[0].group, '40');
+  assert.equal(p.skus[0].group, '39.9');
   assert.equal(p.discount, '9.5');
   assert.deepEqual(p.main, ['foot-bath-main.png']);
   assert.deepEqual(p.detail, ['foot-bath-scene.png']);
