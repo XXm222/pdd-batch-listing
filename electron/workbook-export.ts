@@ -160,7 +160,12 @@ export async function exportProductWorkbook(p: Product, template: string, assets
   if (!taobao && p.source.startsWith('拼多多采集：')) {
     const rowNumber = sourceRow
       ? Number(sourceRow['@r'])
-      : attributeStart + (p.attributes || []).length;
+      : // 模板里没有「采集来源」这一行就补在最末行之后（也要让开刚占用的属性行），
+        // 绝不覆盖模板自带的说明行。
+        Math.max(
+          ...rows[0].map((r) => Number(r['@r'])),
+          attributeStart + (p.attributes || []).length,
+        ) + 1;
     set(0, rowNumber, 0, '采集来源');
     set(0, rowNumber, 1, p.source);
     set(0, rowNumber, 2, '自动记录');

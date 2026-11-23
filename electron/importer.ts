@@ -45,7 +45,7 @@ function text(value: any): string {
 }
 // 运营常用公式算价（如单买价 = 拼单价/0.99），Excel 缓存值会留一长串小数；
 // 后台只收两位小数：本来就合规的报价（39.9 / 49.99）原样保留，
-// 只有公式缓存超过两位时才四舍五入到两位，改过的值在核对界面里能看到。
+// 只有公式缓存超过两位时才四舍五入到两位（只丢弃公式的中间精度，不改运营填的数）。
 function money(value: string): string {
   const raw = String(value ?? '').trim();
   if (!raw) return '';

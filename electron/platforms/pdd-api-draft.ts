@@ -31,23 +31,40 @@ export const apiInstallMatches = (
   resolvedTemplate?: string,
 ): boolean => {
   if (!product.install) return true;
-  const key = apiInstallType(product.install.delivery);
+  const want = String(resolvedTemplate || '').trim();
+  const attached = (
+    Array.isArray(detail.goods_srv_templates) ? (detail.goods_srv_templates as Row[]) : []
+  )
+    .map((row) => String(row?.id ?? '').trim())
+    .filter(Boolean);
+  // 草稿详情里没有表单那个 srv_template_id_map，真正的落点是 goods_srv_templates 的 id；
+  // 旧字段只在个别返回里出现，读到就一起认，读不到不据此判失败。
   const map = (detail.srv_template_id_map || {}) as Record<string, unknown>;
-  const saved = String(map[key] ?? '').trim();
-  if (!saved) return false;
-  const typed = String(product.install.template || '').trim();
-  const want = String(resolvedTemplate || '').trim() || (/^SIST_/.test(typed) ? typed : '');
-  if (want && saved !== want) return false;
+  const key = apiInstallType(product.install.delivery);
+  const mapped = String(map[key] ?? '').trim();
+  const saved = [...attached, mapped].filter(Boolean);
+  if (!saved.length) return false;
+  if (want && !saved.includes(want)) return false;
   const skus = Array.isArray(detail.sku) ? (detail.sku as Row[]) : [];
   if (skus.length !== product.skus.length) return false;
-  for (const [index, sku] of product.skus.entries()) {
-    const rim = apiRim(product, sku);
-    if (!rim) return false;
-    const raw = skus[index]?.sku_srv_templates;
-    const text = typeof raw === 'string' ? raw : raw ? JSON.stringify(raw) : '';
-    if (!text.includes(rim)) return false;
-  }
-  return true;
+  const readRim = (row: Row | undefined) => {
+    const raw = row?.sku_srv_templates;
+    if (!raw) return '';
+    if (typeof raw === 'object') return String((raw as Row).rimDiameter ?? '').trim();
+    try {
+      return String((JSON.parse(String(raw)) as Row).rimDiameter ?? '').trim();
+    } catch {
+      return '';
+    }
+  };
+  const expected = product.skus.map((sku) => apiRim(product, sku));
+  if (expected.some((rim) => !rim)) return false;
+  // 后台返回的 SKU 顺序未必跟我们一致：先按顺序比，顺序不同再按排序后的清单比。
+  if (skus.every((row, index) => readRim(row) === expected[index])) return true;
+  const actual = skus.map(readRim).sort();
+  return (
+    actual.length === expected.length && [...expected].sort().every((rim, i) => actual[i] === rim)
+  );
 };
 type Services = { refund: number; invoice: number; authenticity: number };
 // 页面守卫的输入形状：与主进程 LoginEvidence 一致，注入后由 PDD_LOGIN_MATCH 判定。

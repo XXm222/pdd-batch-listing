@@ -658,8 +658,12 @@ test('草稿读回：安装类型、模板与每个 SKU 的轮辋直径缺一项
       { spec: '225/50R18', group: '30', single: '40', stock: '1', rim: '18英寸' },
     ],
   };
+  // 真实草稿详情里没有表单那个 srv_template_id_map，模板落在 goods_srv_templates 的 id 上。
   const good = {
-    srv_template_id_map: { 2: 'SIST_real_1' },
+    goods_srv_templates: [
+      { type: 8, id: 'SIST_real_1' },
+      { type: 10, id: '' },
+    ],
     sku: [
       { sku_srv_templates: '{"rimDiameter":"17英寸"}' },
       { sku_srv_templates: '{"rimDiameter":"18英寸"}' },
@@ -670,11 +674,32 @@ test('草稿读回：安装类型、模板与每个 SKU 的轮辋直径缺一项
   assert.equal(
     apiInstallMatches(
       product,
-      { ...good, srv_template_id_map: { 2: 'SIST_other' } },
+      {
+        ...good,
+        goods_srv_templates: [
+          { type: 8, id: 'SIST_other' },
+          { type: 10, id: '' },
+        ],
+      },
       'SIST_real_1',
     ),
     false,
     '模板不是商品指定的那个',
+  );
+  assert.equal(
+    apiInstallMatches(
+      product,
+      {
+        ...good,
+        goods_srv_templates: [
+          { type: 8, id: '' },
+          { type: 10, id: '' },
+        ],
+      },
+      'SIST_real_1',
+    ),
+    false,
+    '模板没绑定上（两个 id 都是空的）',
   );
   assert.equal(
     apiInstallMatches(product, { ...good, sku: good.sku.slice(0, 1) }, 'SIST_real_1'),
@@ -689,6 +714,11 @@ test('草稿读回：安装类型、模板与每个 SKU 的轮辋直径缺一项
     ),
     false,
     '第二个 SKU 没写轮辋直径',
+  );
+  assert.equal(
+    apiInstallMatches(product, { ...good, sku: [good.sku[1], good.sku[0]] }, 'SIST_real_1'),
+    true,
+    '后台把 SKU 顺序打乱也能对上',
   );
   assert.equal(
     apiInstallMatches({ ...product, install: undefined }, {}, undefined),
