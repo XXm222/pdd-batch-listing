@@ -30,7 +30,7 @@ export type PlatformRuntime = {
   inspectDiagnosis(task: Task, shop: Shop): Promise<PageFacts>;
   recoverPage(task: Task, shop: Shop, action: PageRecovery): Promise<RecoveryResult>;
   /** 读后台可选的到店安装模板；给了 editUrl 就先让桥接打开那个编辑页。 */
-  installTemplates?(shop: Shop, editUrl?: string): Promise<{ label: string; value: string }[]>;
+  installTemplates?(shop: Shop, editUrls?: string | string[]): Promise<{ label: string; value: string }[]>;
 };
 
 export class PlatformRegistry {
@@ -46,7 +46,7 @@ export class PlatformRegistry {
         verifyLogin: (shop, mode, onEvent) => pdd.verifyLogin(shop, mode, onEvent),
         inspectDiagnosis: (task, shop) => pdd.inspectDiagnosis(task, shop),
         recoverPage: (task, shop, action) => pdd.recoverPage(task, shop, action),
-        installTemplates: (shop, editUrl) => pdd.installTemplates(shop, editUrl),
+        installTemplates: (shop, editUrls) => pdd.installTemplates(shop, editUrls),
       },
       taobao: {
         id: 'taobao',

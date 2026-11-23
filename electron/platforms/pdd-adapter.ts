@@ -495,42 +495,79 @@ export class PddAdapter {
   /** 读后台「配送到店模板」下拉里的模板，给资料界面做成下拉选择。 */
   async installTemplates(
     _shop: Shop,
-    editUrl?: string,
+    editUrls: string | string[] = [],
   ): Promise<{ label: string; value: string }[]> {
     await this.bridge.connect();
-    if (editUrl) {
-      // 用桥接自己打开草稿编辑页，不必让运营先去浏览器里点开。
-      // 必须在本标签页内跳转：桥接的 evaluate 不带 tabId，新开标签页后脚本会打在原来那一页上。
-      await this.bridge.navigate(editUrl);
-      await this.bridge.wait(
-        async () => (await this.bridge.eval<string>('location.origin')) === 'https://mms.pinduoduo.com',
-        20000,
-        '没打开拼多多商品编辑页，请检查浏览器连接',
-      );
-      await this.bridge.wait(
-        async () => (await this.bridge.eval<boolean>('document.readyState === "complete"')) === true,
-        20000,
-        '拼多多商品编辑页加载超时，请稍后重试',
-      );
-      await this.bridge.wait(
-        async () =>
+    // connect() 只按商家后台域名挑标签页，运营手动切到的商品编辑页未必在绑定的那一页上；
+    // 先把已经打开的编辑页绑过来，读不到再走下面的候选地址兜底。
+    await this.bridge.focusTab('https://mms.pinduoduo.com/goods/goods_add').catch(() => false);
+    type Options = { ok: boolean; options?: { label: string; value: string }[]; reason?: string };
+    const timeline = 45000;
+    // 换电脑最容易踩的坑：旧机器上「草稿编辑页」和「桥接标签页」都是热的，
+    // 新机器上标签页可能停在商品列表、也可能干脆没打开过编辑页，所以这里三路兜底：
+    // 当前页已经是编辑页就直接读 → 用草稿地址逐个打开 → 都没有就给可执行的提示。
+    const onEditPage = async () => {
+      try {
+        const href = await this.bridge.eval<string>('location.href');
+        if (!href || !href.includes('/goods/goods_add')) return false;
+        return (
           (await this.bridge.eval<boolean>(
             'Boolean(document.body && document.body.innerText.includes("服务与承诺"))',
-          )) === true,
-        20000,
-        '商品编辑页还没渲染出「服务与承诺」，请稍后重试',
+          )) === true
+        );
+      } catch {
+        return false;
+      }
+    };
+    const readOptions = () =>
+      this.bridge.eval<Options>(`(${PDD_TEMPLATE_OPTIONS.toString()})()`, timeline);
+    const firstProblem = (result: Options | undefined) => result?.reason || '没读到后台的到店安装模板';
+
+    if (await onEditPage()) {
+      const here = await readOptions();
+      if (here?.ok) return here.options || [];
+      throw new NeedsUser(
+        `${firstProblem(here)}。当前浏览器已经停在商品编辑页，请手动展开「服务与承诺 → 更多服务 → 展开修改」并勾选「到店安装」，再点一次「读取后台模板」。`,
       );
     }
-    const result = await this.bridge.eval<{
-      ok: boolean;
-      options?: { label: string; value: string }[];
-      reason?: string;
-    }>(`(${PDD_TEMPLATE_OPTIONS.toString()})()`, 20000);
-    if (!result?.ok)
-      throw new NeedsUser(
-        `${result?.reason || '没读到后台的到店安装模板'}。请先把浏览器里的拼多多商品编辑页停在「服务与承诺」，再点一次「读取后台模板」。`,
-      );
-    return result.options || [];
+
+    const urls = (Array.isArray(editUrls) ? editUrls : [editUrls]).filter(Boolean).slice(0, 3);
+    let lastProblem = '';
+    for (const url of urls) {
+      try {
+        // 必须在本标签页内跳转：桥接的 evaluate 不带 tabId，新开标签页后脚本会打在原来那一页上。
+        await this.bridge.navigate(url);
+        await this.bridge.wait(
+          async () => (await this.bridge.eval<string>('location.href')).includes('/goods/goods_add'),
+          timeline,
+          '没打开拼多多商品编辑页，请检查浏览器是否已登录拼多多商家后台',
+        );
+        await this.bridge.wait(
+          async () => (await this.bridge.eval<boolean>('document.readyState === "complete"')) === true,
+          timeline,
+          '拼多多商品编辑页加载超时，请检查网络后重试',
+        );
+        await this.bridge.wait(
+          async () =>
+            (await this.bridge.eval<boolean>(
+              'Boolean(document.body && document.body.innerText.includes("服务与承诺"))',
+            )) === true,
+          timeline,
+          '商品编辑页还没渲染出「服务与承诺」，请检查网络后重试',
+        );
+        const result = await readOptions();
+        if (result?.ok) return result.options || [];
+        lastProblem = firstProblem(result);
+      } catch (error) {
+        lastProblem = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    throw new NeedsUser(
+      urls.length
+        ? `${lastProblem}。已经试过 ${urls.length} 个草稿编辑页都没读到模板，请在浏览器里打开任意商品编辑页，手动勾选「到店安装」后把页面停在「服务与承诺」，再点一次「读取后台模板」。`
+        : '这台电脑还没有打开过拼多多商品编辑页，程序也不知道该打开哪个草稿。请先在浏览器打开拼多多商家后台的任意商品编辑页（服务与承诺可见），再点一次「读取后台模板」。',
+    );
   }
   async verifyLogin(
     shop: Shop,

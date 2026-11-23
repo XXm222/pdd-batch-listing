@@ -706,18 +706,25 @@ else {
           const read = platforms.forShop(shop).installTemplates;
           if (!read) throw new Error('当前平台不支持到店安装模板');
           await requireBrowser(shop.platform);
-          // 优先用这件商品最近的草稿编辑页；没有再退到这家店任意一件草的编辑页
-          // （模板是店铺级的，随便哪个编辑页的下拉都一样）。
-          const mine = store
+          // 模板是店铺级的，随便哪个编辑页的下拉都一样；但换电脑时可能一条草稿都还没有，
+          // 所以这里给一串候选地址：本商品最近 → 同店其它商品最近两件。全都失败由适配器给出可执行的提示。
+          const drafts = store
             .all<Task>('tasks')
             .filter((t) => t.shopId === shop.id && t.goodsId && t.apiDraft?.commitId)
             .sort((a, b) => (a.time < b.time ? 1 : -1));
-          const latest =
-            mine.find((t) => t.productSnapshot?.id === product.id) ?? mine[0];
-          const editUrl = latest
-            ? `https://mms.pinduoduo.com/goods/goods_add/index?id=${latest.apiDraft!.commitId}&goods_id=${latest.goodsId}&type=edit`
-            : undefined;
-          return read(shop, editUrl);
+          const ordered = [
+            ...drafts.filter((t) => t.productSnapshot?.id === product.id),
+            ...drafts.filter((t) => t.productSnapshot?.id !== product.id),
+          ];
+          const editUrls = Array.from(
+            new Set(
+              ordered.map(
+                (t) =>
+                  `https://mms.pinduoduo.com/goods/goods_add/index?id=${t.apiDraft!.commitId}&goods_id=${t.goodsId}&type=edit`,
+              ),
+            ),
+          );
+          return read(shop, editUrls);
         },
         true,
       );

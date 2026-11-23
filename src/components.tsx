@@ -1796,7 +1796,9 @@ function InstallEditor(props: {
         setTemplateNote(`后台只有一个模板「${list[0].label}」，已经选上并记到这家店了。`);
       } else setTemplateNote(`读到 ${list.length} 个模板，选一个就会记到这家店，下次新建商品自动带上。`);
     } catch (error) {
-      setTemplateNote(error instanceof Error ? error.message : String(error));
+      // 主进程抛错经 IPC 会被包一层 "Error invoking remote method 'x': Error: ..."，界面上只留原因。
+      const text = error instanceof Error ? error.message : String(error);
+      setTemplateNote(text.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, ""));
     } finally {
       setLoadingTemplates(false);
     }
