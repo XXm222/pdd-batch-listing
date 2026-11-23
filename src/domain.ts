@@ -174,7 +174,14 @@ export function problems(p: Product): string[] {
   const skuCodes = new Set<string>();
   const combinations = new Set<string>();
   p.skus.forEach((s, i) => {
-    const row = `${isStructuredProduct(p) ? '组合' : '规格'} ${i + 1}`;
+    // 问题清单要说清是哪一行：结构化商品带上组合的选项值（如「组合 3（红款）」）。
+    const label = isStructuredProduct(p)
+      ? (s.options || [])
+          .map((o) => o.value.trim())
+          .filter(Boolean)
+          .join(' / ')
+      : s.spec.trim();
+    const row = `${isStructuredProduct(p) ? '组合' : '规格'} ${i + 1}${label ? `（${label}）` : ''}`;
     if (!s.spec.trim()) out.push(`${row} 名称未填写`);
     if (!isStructuredProduct(p) && specs.has(s.spec.trim())) out.push(`规格名称重复：${s.spec}`);
     specs.add(s.spec.trim());

@@ -104,7 +104,8 @@ export function sanitizeProducts(store: Store, input: unknown): Product[] {
     });
     if (raw.services != null && (typeof raw.services !== 'object' || Array.isArray(raw.services)))
       throw new Error('服务与承诺设置不正确');
-    const services = { sevenDay: '按平台规则', invoice: '否', authenticity: '否', ...raw.services };
+    // 缺省就是「未读取」：不能默认填成「否」，否则运营以为是自己填的。
+    const services = { sevenDay: '', invoice: '', authenticity: '', ...raw.services };
     p.services = { sevenDay: '', invoice: '', authenticity: '' };
     const serviceLabels: Record<string, string> = {
       sevenDay: '7天无理由退货',

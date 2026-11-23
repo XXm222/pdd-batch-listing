@@ -44,7 +44,9 @@ async function patchedExample(destination, changes, source = example) {
             ? `<x:c r="${ref}"><x:f>1+1</x:f><x:v>2</x:v></x:c>`
             : value === 'FORMULA_NO_VALUE'
               ? `<x:c r="${ref}"><x:f>1+1</x:f></x:c>`
-              : `<x:c r="${ref}" t="str"><x:v>${value}</x:v></x:c>`;
+              : /^FORMULA_AT:/.test(value)
+                ? `<x:c r="${ref}"><x:f>F5/0.99</x:f><x:v>${value.slice(11)}</x:v></x:c>`
+                : `<x:c r="${ref}" t="str"><x:v>${value}</x:v></x:c>`;
       if (pattern.test(xml)) xml = xml.replace(pattern, replacement);
       else {
         const row = ref.match(/\d+/)[0];
@@ -362,18 +364,37 @@ test('保存资料时到店安装与轮辋直径不会被丢掉', async () => {
   }
 });
 
-test('手填三位小数与公式缓存都原样保留，由问题清单点名（不静默取整）', async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'goods-price-'));
+test('回归样本一：手填三位小数原样保留，由问题清单点名（不静默取整）', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'goods-price-hand-'));
   try {
     const file = path.join(tmp, 'price.xlsx');
-    await patchedExample(file, { 2: { F5: '39.456', G5: '49.554' } }, v2Example);
+    await patchedExample(file, { 2: { F5: '39.456', G5: '49.99' } }, v2Example);
     const [p] = await parseWorkbook(file);
     assert.equal(p.skus[0].group, '39.456', '手填值原样保留');
-    assert.equal(p.skus[0].single, '49.554', '公式缓存值也原样保留');
+    assert.equal(p.skus[0].single, '49.99', '另一列合规值不受影响');
     const issues = problems(p).join(' / ');
     assert.match(issues, /39\.456/, '问题清单要点出原始值');
     assert.match(issues, /拼单价/);
-    assert.match(issues, /49\.554/);
+    assert.ok(!issues.includes('单买价是'), '合规列不该被点名');
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test('回归样本二：公式缓存超过两位小数也原样保留，由问题清单点名', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'goods-price-formula-'));
+  try {
+    const file = path.join(tmp, 'price.xlsx');
+    await patchedExample(
+      file,
+      { 2: { F5: '29.5', G5: 'FORMULA_AT:29.797979797979798' } },
+      v2Example,
+    );
+    const [p] = await parseWorkbook(file);
+    assert.equal(p.skus[0].group, '29.5');
+    assert.equal(p.skus[0].single, '29.797979797979798', '公式缓存值原样保留');
+    const issues = problems(p).join(' / ');
+    assert.match(issues, /29\.797979797979798/);
     assert.match(issues, /单买价/);
     // 本来就合规的两位小数不报。
     await patchedExample(file, { 2: { F5: '39.45', G5: '49.55' } }, v2Example);
