@@ -8,7 +8,7 @@ export function preflight(product: Product): string[] {
   const issues: string[] = [];
   const skus = product.skus || [];
   const zero = skus.filter((sku) => String(sku.stock).trim() === '0').length;
-  if (zero) issues.push(`${zero} 个规格库存为 0，上架时按 1 件提交，请在后台改成实际库存`);
+  if (zero) issues.push(`${zero} 个规格库存为 0，后台会拒绝提交，请改成实际库存`);
   const singles = skus
     .map((sku) => Number(sku.single))
     .filter((value) => Number.isFinite(value) && value > 0);

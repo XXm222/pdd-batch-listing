@@ -212,8 +212,8 @@ export function problems(p: Product): string[] {
       out.push(`${row} 库存须为非负整数`);
   });
   // 到店安装：开启后每行规格都必须带轮辋直径，且只能取后台下拉里的固定文案。
+  // 模板可以留空——它有两种来源：资料里填过，或这家店铺在界面上选过一次（会记在店铺上）。
   if (p.install) {
-    if (!p.install.template.trim()) out.push('已开启到店安装，请填写到店安装模板');
     for (const [i, s] of p.skus.entries())
       if (!s.rim || !RIM_OPTIONS.includes(s.rim))
         out.push(`第${i + 1}行规格的轮辋直径须从后台下拉选择，如 17英寸、防爆胎18英寸`);

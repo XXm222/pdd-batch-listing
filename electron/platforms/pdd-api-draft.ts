@@ -106,7 +106,8 @@ export const PDD_TEMPLATE_LOOKUP = (name: string) =>
       const host = node as unknown as HTMLElement;
       if (typeof host.scrollIntoView === 'function') host.scrollIntoView({ block: 'center' });
       if (typeof host.dispatchEvent === 'function' && typeof MouseEvent === 'function') {
-        const rect = typeof host.getBoundingClientRect === 'function' ? host.getBoundingClientRect() : null;
+        const rect =
+          typeof host.getBoundingClientRect === 'function' ? host.getBoundingClientRect() : null;
         const view = typeof window !== 'undefined' ? window : undefined;
         const init = {
           bubbles: true,
@@ -155,7 +156,9 @@ export const PDD_TEMPLATE_LOOKUP = (name: string) =>
       );
       let shell: Element | null = group ?? null;
       for (let depth = 0; depth < 4 && shell; depth += 1) {
-        const toggle = (typeof shell.querySelector === 'function' ? shell.querySelector('.bottom-switch') : null) as HTMLElement | null;
+        const toggle = (
+          typeof shell.querySelector === 'function' ? shell.querySelector('.bottom-switch') : null
+        ) as HTMLElement | null;
         if (toggle && typeof toggle.click === 'function') {
           await press(toggle);
           await waitFor(() => Boolean(findBox()) || Boolean(installCheckbox()), 3000);
@@ -199,8 +202,8 @@ export const PDD_TEMPLATE_LOOKUP = (name: string) =>
     }
     const header =
       (box && box.querySelector('[data-testid="beast-core-select-header"]')) ||
-      [...document.querySelectorAll('[data-testid="beast-core-select-header"]')].find(
-        (node) => (node as HTMLElement).parentElement?.parentElement?.innerText.includes('配送到店模板'),
+      [...document.querySelectorAll('[data-testid="beast-core-select-header"]')].find((node) =>
+        (node as HTMLElement).parentElement?.parentElement?.innerText.includes('配送到店模板'),
       ) ||
       null;
     if (!header)
@@ -221,7 +224,8 @@ export const PDD_TEMPLATE_LOOKUP = (name: string) =>
       for (let depth = 0; node && depth < 8; depth += 1) {
         const props = node.memoizedProps as Record<string, unknown> | undefined;
         const option = props?.option as { label?: string; value?: string } | undefined;
-        if (option?.label && option.value) return { label: option.label, value: String(option.value) };
+        if (option?.label && option.value)
+          return { label: option.label, value: String(option.value) };
         node = node.return as typeof node;
       }
       return undefined;
@@ -262,7 +266,8 @@ export const PDD_TEMPLATE_OPTIONS = () =>
       const host = node as unknown as HTMLElement;
       if (typeof host.scrollIntoView === 'function') host.scrollIntoView({ block: 'center' });
       if (typeof host.dispatchEvent === 'function' && typeof MouseEvent === 'function') {
-        const rect = typeof host.getBoundingClientRect === 'function' ? host.getBoundingClientRect() : null;
+        const rect =
+          typeof host.getBoundingClientRect === 'function' ? host.getBoundingClientRect() : null;
         const view = typeof window !== 'undefined' ? window : undefined;
         const init = {
           bubbles: true,
@@ -301,7 +306,9 @@ export const PDD_TEMPLATE_OPTIONS = () =>
       );
       let shell: Element | null = group ?? null;
       for (let depth = 0; depth < 4 && shell; depth += 1) {
-        const toggle = (typeof shell.querySelector === 'function' ? shell.querySelector('.bottom-switch') : null) as HTMLElement | null;
+        const toggle = (
+          typeof shell.querySelector === 'function' ? shell.querySelector('.bottom-switch') : null
+        ) as HTMLElement | null;
         if (toggle && typeof toggle.click === 'function') {
           await press(toggle);
           await waitFor(() => Boolean(findBox()) || Boolean(installCheckbox()), 3000);
@@ -311,6 +318,8 @@ export const PDD_TEMPLATE_OPTIONS = () =>
       }
       return false;
     };
+    // 读模板时会替运营勾上「到店安装」，读完要还原，不然页面停在脏状态（草稿未保存也一样碍眼）。
+    let toggledInstall = false;
     let box = findBox();
     if (!box) {
       await expandServices();
@@ -327,6 +336,7 @@ export const PDD_TEMPLATE_OPTIONS = () =>
         if (!input.checked) {
           const host = input.closest('label') || input;
           await press(host as HTMLElement);
+          toggledInstall = true;
           await waitFor(() => Boolean(findBox()), 3000);
         }
         box = findBox();
@@ -334,11 +344,12 @@ export const PDD_TEMPLATE_OPTIONS = () =>
     }
     const header =
       (box && box.querySelector('[data-testid="beast-core-select-header"]')) ||
-      [...document.querySelectorAll('[data-testid="beast-core-select-header"]')].find(
-        (node) => (node as HTMLElement).parentElement?.parentElement?.innerText.includes('配送到店模板'),
+      [...document.querySelectorAll('[data-testid="beast-core-select-header"]')].find((node) =>
+        (node as HTMLElement).parentElement?.parentElement?.innerText.includes('配送到店模板'),
       ) ||
       null;
-    if (!header) return { ok: false as const, options: [], reason: '页面里没出现「配送到店模板」下拉' };
+    if (!header)
+      return { ok: false as const, options: [], reason: '页面里没出现「配送到店模板」下拉' };
     await press(header as HTMLElement);
     await waitFor(() => document.querySelectorAll('li[role="option"]').length > 0, 2000);
     const seen = new Map<string, string>();
@@ -349,8 +360,7 @@ export const PDD_TEMPLATE_OPTIONS = () =>
       let found: { label: string; value: string } | undefined;
       for (let depth = 0; node && depth < 8; depth += 1) {
         const option = (node.memoizedProps as Record<string, unknown> | undefined)?.option as
-          | { label?: string; value?: string }
-          | undefined;
+          { label?: string; value?: string } | undefined;
         if (option?.label && option.value) {
           found = { label: option.label, value: String(option.value) };
           break;
@@ -360,16 +370,27 @@ export const PDD_TEMPLATE_OPTIONS = () =>
       if (found) seen.set(found.value, found.label);
     }
     (header as HTMLElement).click();
+    if (toggledInstall) {
+      const back = installCheckbox();
+      if (back && back.checked) await press(back.closest('label') || back);
+    }
     const options = [...seen.entries()].map(([value, label]) => ({ value, label }));
     return options.length
       ? { ok: true as const, options }
-      : { ok: false as const, options: [], reason: '后台下拉里一个模板也没有，请先到拼多多后台新建到店安装模板' };
+      : {
+          ok: false as const,
+          options: [],
+          reason: '后台下拉里一个模板也没有，请先到拼多多后台新建到店安装模板',
+        };
   })();
 export function apiInstallType(delivery: 'store' | 'home'): string {
   return delivery === 'store' ? '2' : '3';
 }
 // 拿到解析后的模板 ID 才算通过；名称留到页面里换 ID，见 PDD_TEMPLATE_LOOKUP。
-export function apiInstallPair(delivery: 'store' | 'home', template: string): Record<string, string> {
+export function apiInstallPair(
+  delivery: 'store' | 'home',
+  template: string,
+): Record<string, string> {
   const value = String(template ?? '').trim();
   if (!/^SIST_[A-Za-z0-9_-]+$/.test(value))
     throw new ExecutionError(
@@ -544,7 +565,8 @@ async function pageUpload(
   input: { data: string; name: string; mime: string; shop: GuardShop },
   matchesLogin: (state: GuardState, shop: GuardShop) => boolean,
   anchor: unknown,
-) {  const header = (document.querySelector('header') ||
+) {
+  const header = (document.querySelector('header') ||
     document.querySelector('[role=banner]')) as HTMLElement | null;
   const names = (header?.innerText || '').split('\n').map((s) => s.trim());
   const logout = (header?.textContent || '').includes('退出当前账号');
@@ -897,7 +919,9 @@ export class PddApiDraft {
             '当前类目的服务与承诺不提供正品发票，资料“正品发票=是”按不勾选执行；页面只有发货时间、7天无理由与假一赔十',
           );
         else if (services.invoice)
-          changed('当前类目提供发票服务，但API流程尚未支持发票类型设置，请在后台手动选择发票类型后继续');
+          changed(
+            '当前类目提供发票服务，但API流程尚未支持发票类型设置，请在后台手动选择发票类型后继续',
+          );
         if (rules.must_set_invoice === true && !wantsInvoice)
           changed('当前类目要求提供正品发票，资料未勾选');
         if (rules.is_must_fake_one_lose_ten === true && !services.authenticity)
@@ -905,6 +929,10 @@ export class PddApiDraft {
         let installTemplateId: string | undefined;
         if (p.install) {
           const typed = p.install.template.trim();
+          if (!typed)
+            changed(
+              '这间店铺还没选到店安装模板：请在资料页点「读取后台模板」选一次（选中后会记在这家店上），或在资料「到店安装模板」里填 SIST_ 开头的模板 ID',
+            );
           if (/^SIST_[A-Za-z0-9_-]+$/.test(typed)) installTemplateId = typed;
           else {
             const found = await this.bridge.eval<{
@@ -922,10 +950,7 @@ export class PddApiDraft {
               );
             }
             installTemplateId = found.id;
-            context.patch(
-              {},
-              `到店安装模板「${p.install.template}」已换成后台模板 ${found.id}`,
-            );
+            context.patch({}, `到店安装模板「${p.install.template}」已换成后台模板 ${found.id}`);
           }
         }
         patch({
@@ -948,7 +973,11 @@ export class PddApiDraft {
           context.guard();
           if (uploaded[asset.id]) continue;
           await this.checkIdentity();
-          const result = await this.bridge.eval<{ ok: boolean; value?: unknown; identity?: boolean }>(
+          const result = await this.bridge.eval<{
+            ok: boolean;
+            value?: unknown;
+            identity?: boolean;
+          }>(
             pageUploadScript(
               {
                 data: fs

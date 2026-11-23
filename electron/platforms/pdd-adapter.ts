@@ -507,7 +507,10 @@ export class PddAdapter {
     // 先把已经打开的编辑页绑过来，读不到再走下面的候选地址兜底。
     await this.bridge.focusTab('https://mms.pinduoduo.com/goods/goods_add').catch(() => false);
     type Options = { ok: boolean; options?: { label: string; value: string }[]; reason?: string };
-    const timeline = 45000;
+    // 整次读取共用一份时间预算：以前每个等待各自 45 秒，候选页一多（最多 3 个 × 3 个等待）
+    // 最坏能拖到 9 分钟，界面上就是「点了没反应」。现在总共 45 秒，用完即报错。
+    const deadline = Date.now() + 45000;
+    const remaining = () => Math.max(0, deadline - Date.now());
     // 换电脑最容易踩的坑：旧机器上「草稿编辑页」和「桥接标签页」都是热的，
     // 新机器上标签页可能停在商品列表、也可能干脆没打开过编辑页，所以这里三路兜底：
     // 当前页已经是编辑页就直接读 → 用草稿地址逐个打开 → 都没有就给可执行的提示。
@@ -525,7 +528,10 @@ export class PddAdapter {
       }
     };
     const readOptions = () =>
-      this.bridge.eval<Options>(`(${PDD_TEMPLATE_OPTIONS.toString()})()`, timeline);
+      this.bridge.eval<Options>(
+        `(${PDD_TEMPLATE_OPTIONS.toString()})()`,
+        Math.max(1000, remaining()),
+      );
     const firstProblem = (result: Options | undefined) =>
       result?.reason || '没读到后台的到店安装模板';
 
@@ -540,19 +546,20 @@ export class PddAdapter {
     const urls = (Array.isArray(editUrls) ? editUrls : [editUrls]).filter(Boolean).slice(0, 3);
     let lastProblem = '';
     for (const url of urls) {
+      if (remaining() <= 0) break;
       try {
         // 必须在本标签页内跳转：桥接的 evaluate 不带 tabId，新开标签页后脚本会打在原来那一页上。
         await this.bridge.navigate(url);
         await this.bridge.wait(
           async () =>
             (await this.bridge.eval<string>('location.href')).includes('/goods/goods_add'),
-          timeline,
+          Math.max(1000, remaining()),
           '没打开拼多多商品编辑页，请检查浏览器是否已登录拼多多商家后台',
         );
         await this.bridge.wait(
           async () =>
             (await this.bridge.eval<boolean>('document.readyState === "complete"')) === true,
-          timeline,
+          Math.max(1000, remaining()),
           '拼多多商品编辑页加载超时，请检查网络后重试',
         );
         await this.bridge.wait(
@@ -560,7 +567,7 @@ export class PddAdapter {
             (await this.bridge.eval<boolean>(
               'Boolean(document.body && document.body.innerText.includes("服务与承诺"))',
             )) === true,
-          timeline,
+          Math.max(1000, remaining()),
           '商品编辑页还没渲染出「服务与承诺」，请检查网络后重试',
         );
         const result = await readOptions();

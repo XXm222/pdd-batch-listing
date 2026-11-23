@@ -101,8 +101,22 @@ test('到店安装：开了就必须每行都有合法轮辋直径，否则核�
     p.category = '汽车/用品/配件/改装 > 汽车零配件 > 乘用车轮胎';
     p.reference = '900';
     p.skus = [
-      { spec: '型号:205/45R17', group: '800', single: '810', stock: '5', code: '3633125', rim: '17英寸' },
-      { spec: '型号:215/50R18', group: '900', single: '910', stock: '5', code: '3633085', rim: '18英寸' },
+      {
+        spec: '型号:205/45R17',
+        group: '800',
+        single: '810',
+        stock: '5',
+        code: '3633125',
+        rim: '17英寸',
+      },
+      {
+        spec: '型号:215/50R18',
+        group: '900',
+        single: '910',
+        stock: '5',
+        code: '3633085',
+        rim: '18英寸',
+      },
     ];
     p.install = { delivery: 'store', template: 'SIST_418714932725772662' };
     return p;
@@ -120,7 +134,12 @@ test('到店安装：开了就必须每行都有合法轮辋直径，否则核�
   bogus.skus[0].rim = '大号17';
   assert.match(problems(bogus).join('\n'), /第1行规格的轮辋直径须从后台下拉选择/);
 
+  // 模板留空是允许的：它可能来自「店铺里选过一次」，执行时自动补上；
+  // 两边都没有时由执行阶段报「还没选到店安装模板」，而不是卡在保存资料这一步。
   const noTemplate = build();
   noTemplate.install = { delivery: 'store', template: ' ' };
-  assert.match(problems(noTemplate).join('\n'), /已开启到店安装，请填写到店安装模板/);
+  assert.deepEqual(
+    problems(noTemplate).filter((line) => line.includes('到店安装')),
+    [],
+  );
 });

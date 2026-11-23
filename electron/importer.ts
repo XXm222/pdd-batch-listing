@@ -88,10 +88,12 @@ export function parseInstall(values: Record<string, string>): InstallService | u
   if (!['是', '否'].includes(enabled)) throw new Error('到店安装只能填写是或否');
   if (enabled === '否') return undefined;
   const deliveryText = (values['到店安装类型'] || '').trim() || '配送到店';
-  const delivery = deliveryText === '配送到店' ? 'store' : deliveryText === '配送到家' ? 'home' : undefined;
+  const delivery =
+    deliveryText === '配送到店' ? 'store' : deliveryText === '配送到家' ? 'home' : undefined;
   if (!delivery) throw new Error('到店安装类型只能填写「配送到店」或「配送到家」');
   const template = (values['到店安装模板'] || '').trim();
-  if (!template) throw new Error('已开启到店安装，请填写到店安装模板（模板 ID 或模板名称）');
+  // 模板可以留空：店铺在界面上选过一次就会记住，执行时自动补上；
+  // 两边都没有时由执行阶段给出「还没选模板」的明确提示。
   return { delivery, template };
 }
 
@@ -540,7 +542,8 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
     const explicitRim = String(value('轮辋直径') || '').trim();
     const rim = explicitRim ? rimOptionLabel(explicitRim) : rimDiameterLabel(spec, p.title);
     if (explicitRim && !rim) throw new Error(`轮辋直径「${explicitRim}」不是后台可选项`);
-    if (p.install && !rim) throw new Error(`编码 ${code || p.title} 读不到轮辋直径，请填写「轮辋直径」列`);
+    if (p.install && !rim)
+      throw new Error(`编码 ${code || p.title} 读不到轮辋直径，请填写「轮辋直径」列`);
     p.skus.push({
       spec,
       group: money(value('拼单价')),
