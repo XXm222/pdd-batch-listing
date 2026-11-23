@@ -294,11 +294,12 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
     p.demo = values['是否测试素材'] === '是';
     p.source = values['采集来源'] || path.basename(file);
     p.services = {
-      // 「采集来源」的文件里服务项通常是空的（采集阶段读不到后台选择），
-      // 这里保留空值表示「未知」，让核对界面提示运营去选，而不是替他们猜。
-      sevenDay: values['7天无理由退货'] || (values['采集来源'] ? '' : '按平台规则'),
-      invoice: values['正品发票'] || (values['采集来源'] ? '' : '否'),
-      authenticity: values['假一赔十'] || (values['采集来源'] ? '' : '否'),
+      // 服务三项一律照原样保留，空的就留空（表示「运营还没选」）：
+      // 写死「按平台规则 / 否」等于替运营决定，而「假一赔十=否」在要求假一赔十的类目里
+      // 还会反过来把任务拦下来。执行阶段按当前类目规则取默认，并在执行记录里写明。
+      sevenDay: values['7天无理由退货'] || '',
+      invoice: values['正品发票'] || '',
+      authenticity: values['假一赔十'] || '',
     };
     const install = parseInstall(values);
     if (install) p.install = install;
@@ -521,9 +522,9 @@ export async function parseWorkbook(file: string, assetsDir?: string): Promise<P
       for (const [label, prop] of Object.entries(strings))
         (p as unknown as Record<string, unknown>)[prop] = value(label);
       p.services = {
-        sevenDay: value('7天无理由退货') || '按平台规则',
-        invoice: value('正品发票') || '否',
-        authenticity: value('假一赔十') || '否',
+        sevenDay: value('7天无理由退货') || '',
+        invoice: value('正品发票') || '',
+        authenticity: value('假一赔十') || '',
       };
       p.install ??= parseInstall({
         到店安装: value('到店安装'),

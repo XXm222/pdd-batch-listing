@@ -302,7 +302,12 @@ test('batch produces separate pictured workbooks, preserves source/zero stock/un
       [p],
     );
     assert.equal(saved.services.invoice, '');
-    assert(problems(saved).some((message) => /正品发票/.test(message)));
+    // 空的服务项不再算「问题」：执行时按类目规则取默认，并在执行记录里写明，
+    // 所以这里断言不会因为没填就拦下商品（旧行为会写死「否」并报错）。
+    assert.equal(
+      problems(saved).some((message) => /正品发票|假一赔十|7天无理由/.test(message)),
+      false,
+    );
     const output = path.join(dir, 'batch.zip'),
       seen = [];
     const collector = new ShopCollector(
@@ -344,7 +349,7 @@ test('batch produces separate pictured workbooks, preserves source/zero stock/un
       await fs.writeFile(file, await archive.file(name).async('nodebuffer'));
       const [back] = await parseWorkbook(file, dir);
       assert.equal(back.code, '0000123');
-      
+
       assert.equal(back.skus[0].stock, '0');
       assert.equal(back.source, p.source);
       assert.equal(back.services.invoice, '');

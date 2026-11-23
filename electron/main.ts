@@ -19,6 +19,7 @@ import { Worker } from 'node:worker_threads';
 import { Store } from './store';
 import type { ImportFailure } from './importer';
 import { prepareTasks, TaskRunner } from './task-runner';
+import { pickShop } from './shop-pick';
 import { PlatformRegistry } from './platforms/registry';
 import { ShopLoginError } from './platforms/shop-login';
 import { ExecutionError } from './execution';
@@ -286,14 +287,9 @@ else {
         return decrypted.result;
       };
       const platforms = new PlatformRegistry(app.getPath('userData'), decryptShopPassword);
-      /** 资料上记的店铺名 → 店铺记录；只有一个店铺时直接用它。 */
-      const productShop = (product: Product): Shop => {
-        const shops = store.all<Shop>('shops');
-        const named = shops.find((s) => s.name === product.expectedShop);
-        if (named) return named;
-        if (shops.length === 1) return shops[0];
-        throw new Error(`找不到店铺「${product.expectedShop}」，请先在店铺管理里添加`);
-      };
+      /** 资料上记的店铺 → 店铺记录；解析规则见 pickShop（支持店铺 ID，名称归一化，同名报歧义）。 */
+      const productShop = (product: Product): Shop =>
+        pickShop(store.all<Shop>('shops'), product.expectedShop);
       runner = new TaskRunner(
         store,
         app.getPath('userData'),

@@ -221,12 +221,15 @@ export function problems(p: Product): string[] {
   const services = { sevenDay: '按平台规则', invoice: '否', authenticity: '否', ...p.services };
   if (p.category.endsWith('沐浴桶/沐浴盆') && services.sevenDay === '否')
     out.push('当前泡脚桶类目必须支持 7 天无理由退货');
+  // 空值表示「运营还没选」：执行阶段按当前类目规则取默认，并在执行记录里写明，
+  // 所以这里只校验写了的取值，不把空当错误（写死「否」反而可能在要求假一赔十的类目被拦下）。
   for (const [label, value] of [
     ['7天无理由退货', services.sevenDay],
     ['正品发票', services.invoice],
     ['假一赔十', services.authenticity],
   ])
-    if (!['是', '否', '按平台规则'].includes(value)) out.push(`${label}请选择是、否或按平台规则`);
+    if (value && !['是', '否', '按平台规则'].includes(value))
+      out.push(`${label}请选择是、否或按平台规则`);
   const attributes = new Set<string>();
   for (const a of p.attributes || []) {
     if (!a.name.trim() || (a.required && !a.value.trim()))

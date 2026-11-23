@@ -671,6 +671,37 @@ test('草稿读回：安装类型、模板与每个 SKU 的轮辋直径缺一项
     ],
   };
   assert.equal(apiInstallMatches(product, good, 'SIST_real_1'), true);
+  // 只比 id 集合的话，模板挂到了对家槽位（配送到店 ↔ 配送到家）也会被放过。
+  assert.equal(
+    apiInstallMatches(
+      product,
+      {
+        ...good,
+        goods_srv_templates: [
+          { type: 8, id: '' },
+          { type: 10, id: 'SIST_real_1' },
+        ],
+      },
+      'SIST_real_1',
+    ),
+    false,
+    '模板挂到了另一种安装类型的槽位',
+  );
+  assert.equal(
+    apiInstallMatches(
+      { ...product, install: { delivery: 'home', template: 'SIST_real_1' } },
+      {
+        ...good,
+        goods_srv_templates: [
+          { type: 8, id: 'SIST_real_1' },
+          { type: 10, id: '' },
+        ],
+      },
+      'SIST_real_1',
+    ),
+    false,
+    '资料选配送到家，后台却挂在配送到店',
+  );
   assert.equal(apiInstallMatches(product, {}, 'SIST_real_1'), false, '缺模板');
   assert.equal(
     apiInstallMatches(

@@ -42,6 +42,21 @@ export const apiInstallMatches = (
   const map = (detail.srv_template_id_map || {}) as Record<string, unknown>;
   const key = apiInstallType(product.install.delivery);
   const mapped = String(map[key] ?? '').trim();
+  // 模板挂在哪个槽位（配送到店 type 8 / 配送到家 type 10）必须和资料选的一致：
+  // 只比 id 集合的话，运营把「配送到店」选成「配送到家」照样过，后台实际挂到了另一类模板。
+  const slot = product.install.delivery === 'home' ? 10 : 8;
+  const typed = (
+    Array.isArray(detail.goods_srv_templates) ? (detail.goods_srv_templates as Row[]) : []
+  )
+    .filter((row) => typeof row?.type === 'number')
+    .map((row) => ({ type: Number(row.type), id: String(row.id ?? '').trim() }));
+  if (typed.length) {
+    const here = String(typed.find((row) => row.type === slot)?.id || '');
+    const other = String(typed.find((row) => row.type !== slot)?.id || '');
+    if (!here) return false;
+    if (other) return false;
+    if (want && here !== want) return false;
+  }
   const saved = [...attached, mapped].filter(Boolean);
   if (!saved.length) return false;
   if (want && !saved.includes(want)) return false;
@@ -973,6 +988,17 @@ export class PddApiDraft {
                 ? 1
                 : 0,
         };
+        // 资料里没填的服务项不替运营编一个「否」，按当前类目规则取默认并留下说明。
+        const blank = [
+          p.services?.sevenDay ? '' : '7天无理由退货',
+          p.services?.invoice ? '' : '正品发票',
+          p.services?.authenticity ? '' : '假一赔十',
+        ].filter(Boolean);
+        if (blank.length)
+          context.patch(
+            {},
+            `资料里${blank.join('、')}没填，已按当前类目规则取默认值（没有替你填成"否"）`,
+          );
         if (wantsInvoice && !invoice.offers)
           context.patch(
             {},

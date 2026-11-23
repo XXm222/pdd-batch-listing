@@ -498,12 +498,32 @@ export class PddAdapter {
       throw new NeedsUser(`后台登录店铺与所选店铺“${shop.name}”不一致，请核对后继续`);
     this.check('identity', true, shopIdentityMessage(shop));
   }
+  /** 读取结束后把标签页导回运营原本停的地方。 */
+  private async restorePage(href: string) {
+    if (!href || !href.includes('mms.pinduoduo.com')) return;
+    const now = await this.bridge.eval<string>('location.href').catch(() => '');
+    if (!now || now === href) return;
+    await this.bridge.navigate(href).catch(() => undefined);
+  }
   /** 读后台「配送到店模板」下拉里的模板，给资料界面做成下拉选择。 */
   async installTemplates(
     shop: Shop,
     editUrls: string | string[] = [],
   ): Promise<{ label: string; value: string }[]> {
     await this.bridge.connect();
+    // 桥接的 evaluate 不带 tabId，读模板只能在本标签页里跳转；先记下运营原本停在哪一页，
+    // 读完导回去——否则他正在编辑的商品会被顶走，没保存的改动就丢了。
+    const openedWith = await this.bridge.eval<string>('location.href').catch(() => '');
+    try {
+      return await this.readInstallTemplates(shop, editUrls);
+    } finally {
+      await this.restorePage(openedWith);
+    }
+  }
+  private async readInstallTemplates(
+    shop: Shop,
+    editUrls: string | string[] = [],
+  ): Promise<{ label: string; value: string }[]> {
     // connect() 只按商家后台域名挑标签页，运营手动切到的商品编辑页未必在绑定的那一页上；
     // 先把已经打开的编辑页绑过来，读不到再走下面的候选地址兜底。
     await this.bridge.focusTab('https://mms.pinduoduo.com/goods/goods_add').catch(() => false);
