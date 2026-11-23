@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #f5f6f8;
   --surface: #fff;
   --sidebar: #f0f2f6;
@@ -879,8 +879,8 @@ svg {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
-  textarea:focus-visible,
-  [tabindex]:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible,
 select:focus-visible,
 summary:focus-visible {
   outline: 2px solid #3154bd;
@@ -3531,7 +3531,7 @@ textarea {
   gap: 4px;
 }
 
-/* 妯℃澘涓嬭浇锛氭嫾澶氬涓庡ぉ鐚瓧娈典笉鍚岋紝鍚勫甫涓€浠芥ā鏉匡紝鍏堥€夊钩鍙板啀涓嬭浇銆?*/
+/* 濡剝婢樻稉瀣祰閿涙碍瀚炬径姘樋娑撳骸銇夐悮顐㈢摟濞堝吀绗夐崥宀嬬礉閸氬嫬鐢稉鈧禒鑺ツ侀弶鍖＄礉閸忓牓鈧閽╅崣鏉垮晙娑撳娴囬妴?*/
 .template-actions {
   display: grid;
   gap: 12px;
@@ -3881,32 +3881,30 @@ textarea {
 }
 
 /* ==========================================================================
-   界面 v2 · 按 IBM Carbon 的分层与间距规格重写
-   依据：https://www.carbondesignsystem.com/building-blocks/foundations/spacing/overview
+   鐣岄潰 v2 路 鎸?IBM Carbon 鐨勫垎灞備笌闂磋窛瑙勬牸閲嶅啓
+   渚濇嵁锛歨ttps://www.carbondesignsystem.com/building-blocks/foundations/spacing/overview
          https://www.carbondesignsystem.com/building-blocks/core/components/data-table/specifications
-   原则：靠"层"分层，不靠投影；间距只走 4/8/12/16/24/32/40/48；字号只用 11/12/14/20；
-        字重只用 400/600；品牌色每屏不超过 3 处。
-   ========================================================================== */
+   鍘熷垯锛氶潬"灞?鍒嗗眰锛屼笉闈犳姇褰憋紱闂磋窛鍙蛋 4/8/12/16/24/32/40/48锛涘瓧鍙峰彧鐢?11/12/14/20锛?        瀛楅噸鍙敤 400/600锛涘搧鐗岃壊姣忓睆涓嶈秴杩?3 澶勩€?   ========================================================================== */
 
 :root {
-  /* 层 */
+  /* 灞?*/
   --l0: #f4f6f8;
   --l1: #ffffff;
   --l2: #eef1f4;
   --rule: #d9dee5;
-  /* 墨 */
+  /* 澧?*/
   --ink: #16181d;
   --ink-2: #5b6472;
   --ink-3: #8a93a1;
-  /* 一个品牌色 */
+  /* 涓€涓搧鐗岃壊 */
   --brand: #3154bd;
   --brand-press: #24439f;
   --brand-soft: #e9eefa;
-  /* 状态只做小点与描边 */
+  /* 鐘舵€佸彧鍋氬皬鐐逛笌鎻忚竟 */
   --ok: #276a47;
   --warn: #875710;
   --bad: #b63536;
-  /* 尺寸 */
+  /* 灏哄 */
   --row: 40px;
   --ctl: 32px;
   --radius: 6px;
@@ -3924,7 +3922,7 @@ body {
   background: var(--l0);
 }
 
-/* ---------- 侧栏：一条白层 + 一条 1px 线 ---------- */
+/* ---------- 渚ф爮锛氫竴鏉＄櫧灞?+ 涓€鏉?1px 绾?---------- */
 .sidebar {
   width: 240px;
   background: var(--l1);
@@ -4022,7 +4020,7 @@ body {
   height: 6px;
 }
 
-/* ---------- 工具条：40 高，一条线收口 ---------- */
+/* ---------- 宸ュ叿鏉★細40 楂橈紝涓€鏉＄嚎鏀跺彛 ---------- */
 .topbar {
   height: 40px;
   padding: 0 16px;
@@ -4047,7 +4045,7 @@ body {
   gap: 4px;
 }
 
-/* ---------- 工作区 ---------- */
+/* ---------- 宸ヤ綔鍖?---------- */
 main {
   padding: 16px 24px 24px;
 }
@@ -4067,7 +4065,7 @@ main {
   color: var(--ink-3);
 }
 
-/* ---------- 进度轨：20 号圈 + 12 号字 ---------- */
+/* ---------- 杩涘害杞細20 鍙峰湀 + 12 鍙峰瓧 ---------- */
 .steps {
   gap: 16px;
   margin: 0 0 24px;
@@ -4102,7 +4100,7 @@ main {
   margin-left: 0;
 }
 
-/* ---------- 状态条：白层 + 细线，不做彩色卡 ---------- */
+/* ---------- 鐘舵€佹潯锛氱櫧灞?+ 缁嗙嚎锛屼笉鍋氬僵鑹插崱 ---------- */
 .execution-banner {
   background: var(--l1);
   border: 1px solid var(--rule);
@@ -4121,7 +4119,7 @@ main {
   color: var(--ink-2);
 }
 
-/* ---------- 导入面板：单据区块 ---------- */
+/* ---------- 瀵煎叆闈㈡澘锛氬崟鎹尯鍧?---------- */
 .import-panel {
   background: var(--l1);
   border: 1px solid var(--rule);
@@ -4190,7 +4188,7 @@ main {
   color: var(--ink-3);
 }
 
-/* ---------- 按钮：32 高，两档 ---------- */
+/* ---------- 鎸夐挳锛?2 楂橈紝涓ゆ。 ---------- */
 .button {
   height: var(--ctl);
   min-height: var(--ctl);
@@ -4234,7 +4232,7 @@ main {
   color: var(--ink);
 }
 
-/* ---------- 数据表：Carbon 规格 ---------- */
+/* ---------- 鏁版嵁琛細Carbon 瑙勬牸 ---------- */
 .library {
   margin-top: 24px;
 }
@@ -4341,7 +4339,7 @@ tbody tr:last-child td {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- 标签页：底线强调 ---------- */
+/* ---------- 鏍囩椤碉細搴曠嚎寮鸿皟 ---------- */
 .tabs {
   border-bottom: 1px solid var(--rule);
 }
@@ -4358,7 +4356,7 @@ tbody tr:last-child td {
   border-bottom-color: var(--brand);
 }
 
-/* ---------- 批量条：品牌色反白（Carbon batch action bar） ---------- */
+/* ---------- 鎵归噺鏉★細鍝佺墝鑹插弽鐧斤紙Carbon batch action bar锛?---------- */
 .batch-bar,
 .selection-bar {
   background: var(--brand);
@@ -4378,7 +4376,7 @@ tbody tr:last-child td {
   background: rgba(255, 255, 255, 0.26);
 }
 
-/* ---------- 焦点：2px 品牌色，不靠阴影 ---------- */
+/* ---------- 鐒︾偣锛?px 鍝佺墝鑹诧紝涓嶉潬闃村奖 ---------- */
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
@@ -4390,13 +4388,13 @@ summary:focus-visible,
   outline-offset: 2px;
 }
 
-/* ---------- 全屏只留一个投影：弹窗 ---------- */
+/* ---------- 鍏ㄥ睆鍙暀涓€涓姇褰憋細寮圭獥 ---------- */
 .modal-panel,
 .dialog {
   box-shadow: 0 16px 48px rgba(22, 24, 29, 0.18);
 }
 
-/* ---------- 批量条文字：反白必须真的白 ---------- */
+/* ---------- 鎵归噺鏉℃枃瀛楋細鍙嶇櫧蹇呴』鐪熺殑鐧?---------- */
 .batch-bar {
   display: flex;
   align-items: center;
@@ -4430,7 +4428,7 @@ summary:focus-visible,
   background: rgba(255, 255, 255, 0.3);
 }
 
-/* ---------- 批量条：空闲时是普通层，选了东西才反白 ---------- */
+/* ---------- 鎵归噺鏉★細绌洪棽鏃舵槸鏅€氬眰锛岄€変簡涓滆タ鎵嶅弽鐧?---------- */
 .batch-bar {
   background: var(--l1);
   border: 1px solid var(--rule);
@@ -4477,8 +4475,8 @@ summary:focus-visible,
   color: rgba(255, 255, 255, 0.9);
 }
 
-/* ---------- v2 收口：弹窗表单与规格表对齐 ---------- */
-.modal input:not([type="checkbox"]):not([type="radio"]),
+/* ---------- v2 鏀跺彛锛氬脊绐楄〃鍗曚笌瑙勬牸琛ㄥ榻?---------- */
+.modal input:not([type='checkbox']):not([type='radio']),
 .modal select,
 .modal textarea,
 .field-grid input,
@@ -4552,8 +4550,10 @@ summary:focus-visible,
   font-size: 13px;
 }
 
-/* ---------- 规格表列宽与行高收口 ---------- */
-.sku-grid { min-width: 1120px; }
+/* ---------- 瑙勬牸琛ㄥ垪瀹戒笌琛岄珮鏀跺彛 ---------- */
+.sku-grid {
+  min-width: 1120px;
+}
 .sku-grid th:nth-child(3) {
   width: 26%;
 }
@@ -4580,7 +4580,7 @@ summary:focus-visible,
   color: var(--ink-3);
 }
 
-/* 到店安装区块（发货与服务里的独立层） */
+/* 鍒板簵瀹夎鍖哄潡锛堝彂璐т笌鏈嶅姟閲岀殑鐙珛灞傦級 */
 .install-block {
   margin-top: 12px;
   padding: 16px;
@@ -4644,7 +4644,7 @@ summary:focus-visible,
   margin: 4px 0 0;
   max-width: 62ch;
 }
-/* 侧栏 · 分组 / 中部滚动 / 底部固定（分组标题 + 淡分割线） */
+/* 渚ф爮 路 鍒嗙粍 / 涓儴婊氬姩 / 搴曢儴鍥哄畾锛堝垎缁勬爣棰?+ 娣″垎鍓茬嚎锛?*/
 :root {
   --rule-soft: #eceff3;
 }
@@ -4793,7 +4793,7 @@ summary:focus-visible,
 .sidebar .update-badge {
   margin-left: auto;
 }
-/* 侧栏 · 选中态用底块（去掉左侧细条），底部升级入口独立成条 */
+/* 渚ф爮 路 閫変腑鎬佺敤搴曞潡锛堝幓鎺夊乏渚х粏鏉★級锛屽簳閮ㄥ崌绾у叆鍙ｇ嫭绔嬫垚鏉?*/
 .sidebar .nav-item.active {
   box-shadow: none;
   background: #e4ebf9;
@@ -4826,7 +4826,7 @@ summary:focus-visible,
 .sidebar .update-link ~ .sidebar-link {
   order: 3;
 }
-/* 侧栏外框不再自带内边距，交给分组与底部各自控制 */
+/* 渚ф爮澶栨涓嶅啀鑷甫鍐呰竟璺濓紝浜ょ粰鍒嗙粍涓庡簳閮ㄥ悇鑷帶鍒?*/
 .sidebar {
   padding: 0;
 }
@@ -4834,12 +4834,21 @@ summary:focus-visible,
 .sidebar .brand {
   border-bottom: 1px solid var(--rule-soft);
 }
-/* 到店安装：说明与按钮同排，按钮不挤压说明 */
-.install-foot { flex-wrap: wrap; gap: 12px; }
-.install-foot .quiet-note { flex: 1; min-width: 240px; margin: 0; }
-.install-foot .button { flex: none; }
+/* 鍒板簵瀹夎锛氳鏄庝笌鎸夐挳鍚屾帓锛屾寜閽笉鎸ゅ帇璇存槑 */
+.install-foot {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.install-foot .quiet-note {
+  flex: 1;
+  min-width: 240px;
+  margin: 0;
+}
+.install-foot .button {
+  flex: none;
+}
 
-/* 库存为 0 的一次性补齐提示 */
+/* 搴撳瓨涓?0 鐨勪竴娆℃€цˉ榻愭彁绀?*/
 .sku-bulk {
   display: flex;
   align-items: center;
@@ -4856,4 +4865,130 @@ summary:focus-visible,
 
 .sku-bulk .button {
   flex: none;
+}
+
+/* 璁剧疆椤?路 鍒嗗尯鍗＄墖 */
+.settings {
+  display: grid;
+  gap: 16px;
+  max-width: 960px;
+}
+.settings-list {
+  display: grid;
+  gap: 8px;
+}
+.settings-card {
+  background: var(--l1);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.settings-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px;
+}
+.settings-copy {
+  flex: 1;
+  min-width: 0;
+}
+.settings-copy h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.settings-copy p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ink-2);
+}
+.settings-copy .quiet-note {
+  color: var(--ink-3);
+}
+.settings-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.settings-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--l2);
+  color: var(--ink-2);
+}
+.nav-count.update {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+/* 鍛煎惛鐏細杩炴帴鐘舵€佺敤鑺傚琛ㄨ揪锛屼笉闈犻鑹插爢鍙?*/
+.breath {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+.breath.on {
+  background: var(--ok);
+  animation: breath-ok 2.4s ease-in-out infinite;
+}
+.breath.warn {
+  background: var(--warn);
+  animation: breath-warn 2.4s ease-in-out infinite;
+}
+.breath.wait {
+  background: var(--brand);
+  animation: breath-wait 1.2s ease-in-out infinite;
+}
+@keyframes breath-ok {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(39 106 71 / 0.34);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgb(39 106 71 / 0);
+  }
+}
+@keyframes breath-warn {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(135 87 16 / 0.3);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgb(135 87 16 / 0);
+  }
+}
+@keyframes breath-wait {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(49 84 189 / 0.3);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgb(49 84 189 / 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .breath.on,
+  .breath.warn,
+  .breath.wait {
+    animation: none;
+  }
+}
+@media (max-width: 900px) {
+  .settings-row {
+    flex-wrap: wrap;
+  }
+  .settings-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
 }

@@ -10,13 +10,12 @@ import {
   Download,
   FileSpreadsheet,
   FolderOpen,
-  Globe,
   HardDrive,
   Inbox,
   LoaderCircle,
   Plus,
   Search,
-  SlidersHorizontal,
+  Settings as SettingsIcon,
   Store,
   Upload,
   X,
@@ -37,6 +36,7 @@ import { batchProgress, taskIsHistory } from './task-progress';
 import { AgentSettings } from './AgentSettings';
 import { ShopLogin } from './ShopLogin';
 import { BrowserSetup } from './BrowserSetup';
+import { Settings } from './Settings';
 import { isTaobaoProduct, lowestPrice, missingSkuImages, problems } from './domain';
 import { preflightNotice } from './product-checks';
 import { DEFAULT_PLATFORM, PLATFORM_ORDER, platformMeta, type PlatformId } from './platforms';
@@ -45,12 +45,13 @@ import { mergeWorkspace, applyTaskUpdate } from './workspace-state';
 import { TemplateDownload } from './TemplateDownload';
 import { Recognition, ShopEditor, ShopManagement, ShopPicker, Status } from './components';
 
-type Page = 'products' | 'shops' | 'tasks' | 'collection';
+type Page = 'products' | 'shops' | 'tasks' | 'collection' | 'settings';
 const pages: Record<Page, string> = {
   products: '商品资料',
   shops: '店铺管理',
   tasks: '执行记录',
   collection: '店铺商品导出',
+  settings: '设置',
 };
 const initial: Workspace = {
   products: [],
@@ -105,8 +106,6 @@ export default function App() {
     }
   });
   const hasNewUpdate = !!updateState?.release;
-  const unreadUpdateNotes =
-    !!data.version && !!updateState?.currentNotes && notesSeenVersion !== data.version;
   const showUpdates = () => {
     setUpdatesOpen(true);
     if (data.version) {
@@ -391,6 +390,10 @@ export default function App() {
                     { id: 'tasks', Icon: ClipboardList },
                   ],
                 },
+                {
+                  title: '系统',
+                  items: [{ id: 'settings', Icon: SettingsIcon }],
+                },
               ] as const
             ).map((group) => (
               <div className="nav-group" key={group.title}>
@@ -407,6 +410,9 @@ export default function App() {
                     {id === 'products' && data.products.length ? (
                       <span className="nav-count">{data.products.length}</span>
                     ) : null}
+                    {id === 'settings' && hasNewUpdate ? (
+                      <span className="nav-count update">新版本</span>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -416,62 +422,27 @@ export default function App() {
         <div className="sidebar-foot">
           <div className="sidebar-local">
             <div className="local-status">
-              <span className="dot" aria-hidden="true" />
-              本机工作空间
-            </div>
-            <p>资料保存在这台电脑</p>
-          </div>
-          <div className="nav-group-title">设置与帮助</div>
-          <div className="sidebar-tools">
-            <button
-              className={`sidebar-link update-link ${hasNewUpdate || unreadUpdateNotes ? 'update-highlight' : ''}`}
-              onClick={showUpdates}
-              title={
-                hasNewUpdate
-                  ? `发现新版本 ${updateState!.release!.version}`
-                  : unreadUpdateNotes
-                    ? '查看本次更新内容'
-                    : '查看版本与更新内容'
-              }
-            >
-              <Download size={14} aria-hidden="true" />
-              <span>软件更新</span>
-              {hasNewUpdate || unreadUpdateNotes ? (
-                <span className="update-badge">
-                  {updateState?.status === 'downloading'
-                    ? '下载中'
-                    : hasNewUpdate
-                      ? '新版本'
-                      : '更新内容'}
-                </span>
-              ) : null}
-            </button>
-            <button className="sidebar-link" onClick={showBrowserSetup}>
-              <Globe size={14} aria-hidden="true" />
+              <span
+                className={`breath ${
+                  checkingBrowser
+                    ? 'wait'
+                    : browserStatus?.state === 'ready'
+                      ? 'on'
+                      : browserStatus
+                        ? 'warn'
+                        : 'off'
+                }`}
+                aria-hidden="true"
+              />
               {checkingBrowser
                 ? '检测浏览器连接…'
                 : browserStatus?.state === 'ready'
                   ? '浏览器已连接'
-                  : '浏览器连接 · 安装教程'}
-            </button>
-            <button
-              className="sidebar-link"
-              disabled={loading || !!fatal || running}
-              onClick={() => setAgentSettings(true)}
-            >
-              <SlidersHorizontal size={14} aria-hidden="true" />
-              Agent 模型设置
-            </button>
-            <button
-              className="sidebar-link"
-              onClick={() => {
-                if (window.desktop)
-                  void window.desktop.showDataFolder().catch((e) => setNotice(e.message));
-              }}
-            >
-              <FolderOpen size={14} aria-hidden="true" />
-              打开资料目录
-            </button>
+                  : browserStatus
+                    ? '浏览器未连接'
+                    : '本机工作空间'}
+            </div>
+            <p>资料保存在这台电脑</p>
           </div>
         </div>
       </aside>
@@ -832,6 +803,25 @@ export default function App() {
                 </button>
               </div>
             </>
+          ) : null}
+          {page === 'settings' ? (
+            <Settings
+              browserStatus={browserStatus}
+              checkingBrowser={checkingBrowser}
+              version={data.version}
+              updateState={updateState}
+              encryptionAvailable={data.encryptionAvailable}
+              onCheckBrowser={() => void checkBrowser(true)}
+              onBrowserSetup={showBrowserSetup}
+              onAgentSettings={() => setAgentSettings(true)}
+              onUpdates={showUpdates}
+              onDataFolder={() => {
+                if (window.desktop)
+                  void window.desktop
+                    .showDataFolder()
+                    .catch((e) => setNotice((e as Error).message));
+              }}
+            />
           ) : null}
           {page === 'shops' ? (
             <ShopManagement
