@@ -173,7 +173,12 @@ function imageExtension(file: string, label: string) {
 }
 // 页面脚本只带可核对字段：名称、账号，以及绑定过的后台编号（有则比整数，不留文字）。
 const shopIdentityJson = (shop: Pick<Shop, 'name' | 'account' | 'mallId' | 'userId'>) =>
-  JSON.stringify({ name: shop.name, account: shop.account, mallId: shop.mallId, userId: shop.userId });
+  JSON.stringify({
+    name: shop.name,
+    account: shop.account,
+    mallId: shop.mallId,
+    userId: shop.userId,
+  });
 export class PddAdapter {
   private bridge = new BrowserBridge('https://mms.pinduoduo.com/home/');
   private context!: ExecutionContext;
@@ -521,7 +526,8 @@ export class PddAdapter {
     };
     const readOptions = () =>
       this.bridge.eval<Options>(`(${PDD_TEMPLATE_OPTIONS.toString()})()`, timeline);
-    const firstProblem = (result: Options | undefined) => result?.reason || '没读到后台的到店安装模板';
+    const firstProblem = (result: Options | undefined) =>
+      result?.reason || '没读到后台的到店安装模板';
 
     if (await onEditPage()) {
       const here = await readOptions();
@@ -538,12 +544,14 @@ export class PddAdapter {
         // 必须在本标签页内跳转：桥接的 evaluate 不带 tabId，新开标签页后脚本会打在原来那一页上。
         await this.bridge.navigate(url);
         await this.bridge.wait(
-          async () => (await this.bridge.eval<string>('location.href')).includes('/goods/goods_add'),
+          async () =>
+            (await this.bridge.eval<string>('location.href')).includes('/goods/goods_add'),
           timeline,
           '没打开拼多多商品编辑页，请检查浏览器是否已登录拼多多商家后台',
         );
         await this.bridge.wait(
-          async () => (await this.bridge.eval<boolean>('document.readyState === "complete"')) === true,
+          async () =>
+            (await this.bridge.eval<boolean>('document.readyState === "complete"')) === true,
           timeline,
           '拼多多商品编辑页加载超时，请检查网络后重试',
         );

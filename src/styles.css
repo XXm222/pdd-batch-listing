@@ -3568,8 +3568,16 @@ textarea {
   margin: 12px 0;
 }
 .update-notes {
-  white-space: pre-wrap;
   line-height: 1.7;
+}
+.update-notes-group + .update-notes-group {
+  margin-top: 16px;
+}
+.update-notes-group h5 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
 }
 .update-body progress {
   width: 100%;
