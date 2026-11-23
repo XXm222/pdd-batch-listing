@@ -4,6 +4,7 @@ const {
   apiCents,
   apiInvoice,
   apiInstallPair,
+  apiSrvTemplates,
   apiRim,
   apiInstallType,
   apiCategory,
@@ -725,4 +726,17 @@ test('草稿读回：安装类型、模板与每个 SKU 的轮辋直径缺一项
     true,
     '没开到店安装就不比',
   );
+});
+
+test('提交到店安装时必须同时写 goods_srv_templates，只发 srv_template_id_map 后台不会落库', () => {
+  assert.deepEqual(apiSrvTemplates('store', 'SIST_418714932725772662'), [
+    { type: 8, id: 'SIST_418714932725772662' },
+    { type: 10, id: '' },
+  ]);
+  assert.deepEqual(apiSrvTemplates('home', 'SIST_9'), [
+    { type: 8, id: '' },
+    { type: 10, id: 'SIST_9' },
+  ]);
+  assert.throws(() => apiSrvTemplates('store', '到店模版1'), /SIST_/);
+  assert.throws(() => apiSrvTemplates('store', ''), /SIST_/);
 });

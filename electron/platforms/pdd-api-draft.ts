@@ -439,6 +439,27 @@ export function apiInstallPair(
     );
   return { [apiInstallType(delivery)]: value };
 }
+/**
+ * 真正落到草稿详情里的是 `goods_srv_templates` 的 id（`srv_template_id_map` 只是表单写法）。
+ * 实测：只发 srv_template_id_map 时，读回的 goods_srv_templates 两个 id 都是空的，
+ * 安装服务等于没绑上。type 8 = 配送到店，type 10 = 配送到家。
+ */
+export function apiSrvTemplates(
+  delivery: 'store' | 'home',
+  template: string,
+): { type: number; id: string }[] {
+  const value = String(template ?? '').trim();
+  if (!/^SIST_[A-Za-z0-9_-]+$/.test(value))
+    throw new ExecutionError(
+      'invalid_product',
+      '到店安装模板还没换成后台模板 ID（SIST_ 开头），请先在核对界面解析模板名称',
+      'edit_product',
+    );
+  return [
+    { type: 8, id: delivery === 'store' ? value : '' },
+    { type: 10, id: delivery === 'home' ? value : '' },
+  ];
+}
 function stock(value: string): number {
   // 后台的「*库存」是必填：留空在编辑页里就是一个空输入框，提交会被拦
   // 「请输入第 N 行规格的库存」，所以空值按 1 件上架；显式的 0 是真实库存，原样保留。
@@ -1090,10 +1111,10 @@ export class PddApiDraft {
               p.install.delivery,
               t.apiDraft?.installTemplateId || p.install.template,
             ),
-            goods_srv_templates: [
-              { type: 8, id: '' },
-              { type: 10, id: '' },
-            ],
+            goods_srv_templates: apiSrvTemplates(
+              p.install.delivery,
+              t.apiDraft?.installTemplateId || p.install.template,
+            ),
           }
         : {}),
       skus: p.skus.map((s) => ({
