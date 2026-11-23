@@ -22,10 +22,11 @@ import {
   problems,
   productChanges,
   resolveShopName,
-  shopNameFromAccount,
   isStructuredProduct,
   missingSkuImages,
 } from './domain';
+import { accountKey, accountKind, derivableShopName, normalizePddAccount } from './shop-account';
+import { rimDiameterLabel } from './pdd-rim';
 import { PictureEditor, SkuEditor } from './ProductEditors';
 import {
   DEFAULT_PLATFORM,
@@ -191,6 +192,46 @@ export function Recognition({
     setProducts((all) => all.map((item, i) => (i === index ? fn(item) : item)));
   };
   const field = (key: keyof Product, value: string) => update((p) => ({ ...p, [key]: value }));
+  /**
+   * 参考价必须高于所有单买价，后台才收。运营不想每次自己算最贵那档，
+   * 这里按「最高单买价 + 10」兜底：只在当前值空着或不高于最高单买价时补，
+   * 手填的有效值一律不动。
+   */
+  useEffect(() => {
+    const needsRound = p.skus.some(
+      (sku) => /\.\d/.test(sku.group || '') || /\.\d/.test(sku.single || ''),
+    );
+    if (!needsRound) return;
+    update((product) => ({
+      ...product,
+      skus: product.skus.map((sku) => {
+        const group = /\.\d/.test(sku.group || '') ? String(Math.round(Number(sku.group))) : sku.group;
+        const rounded = /\.\d/.test(sku.single || '')
+          ? String(Math.ceil(Number(sku.single)))
+          : sku.single;
+        // 单买价不能低于拼单价，取整撞上了就抬到同一个数。
+        const single = Number(rounded) < Number(group) ? group : rounded;
+        return { ...sku, group, single };
+      }),
+    }));
+  }, [p.skus]);
+  /**
+   * 参考价必须高于所有单买价，后台才收。运营不想每次自己算最贵那档，
+   * 这里按「最高单买价 + 10」兜底：只在当前值空着或不高于最高单买价时补，
+   * 手填的有效值一律不动。
+   */
+  useEffect(() => {
+    const highest = p.skus.reduce((max, sku) => {
+      const value = Number(sku.single);
+      return Number.isFinite(value) && value > max ? value : max;
+    }, 0);
+    if (!highest) return;
+    const reference = Number(p.reference);
+    if (Number.isFinite(reference) && reference > highest) return;
+    const want = String(Math.ceil(highest) + 10);
+    if (p.reference === want) return;
+    update((product) => ({ ...product, reference: want }));
+  }, [p.skus, p.reference]);
   const dirty = JSON.stringify(products) !== JSON.stringify(initial);
   const requestClose = () => {
     if (!busy) dirty ? setClosing(true) : onClose();
@@ -831,6 +872,7 @@ export function Recognition({
                         </label>
                       ))}
                     </div>
+                    <InstallEditor product={p} update={update} />
                   </>
                 ) : null}
               </section>
@@ -1355,22 +1397,41 @@ export function ShopEditor({
   const requestClose = () => {
     if (!busy) dirty ? setClosing(true) : onClose();
   };
-  // 拼多多的店铺名由「店铺名:子账号」推导；淘宝账号是会员名或手机号，名称须手填。
-  const nameEditable = !!initial || !meta.derivesNameFromAccount;
-  const shopName = nameEditable ? form.name : shopNameFromAccount(form.account);
+  // 后台店铺名称才是权威值：主账号名（冒号前半段）经常与店铺名不同，
+  // 所以名称永远可以手填。拼多多留空时才推导，且把推导值先填进输入框让人确认。
+  const [nameTouched, setNameTouched] = useState(!!initial);
+  const suggestedName = meta.derivesNameFromAccount ? derivableShopName(form.account) : '';
+  useEffect(() => {
+    if (nameTouched) return;
+    setForm((f) => (f.name === suggestedName ? f : { ...f, name: suggestedName }));
+  }, [suggestedName, nameTouched]);
+  const account = normalizePddAccount(form.account);
+  const kind = accountKind(account);
+  const normalizeNotice =
+    form.account.trim() && account !== form.account.trim() ? `将保存为「${account}」` : '';
+  const kindNotice = {
+    'main:sub': '子账号登录（主账号:子账号）',
+    mobile: '主账号登录 · 手机号',
+    'numeric-id': '主账号登录 · 数字 ID',
+    email: '主账号登录 · 邮箱',
+    plain: '',
+  }[kind];
+  const accountHint = [normalizeNotice, kindNotice].filter(Boolean).join(' · ');
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError('');
     try {
-      const name = resolveShopName(form.name, form.account, !initial, chosenPlatform);
+      const name = resolveShopName(form.name, account, !initial, chosenPlatform, suggestedName);
       const workspace = await window.desktop.saveShop({
         ...form,
         name,
+        account,
         platform: chosenPlatform,
       });
       setForm((f) => ({ ...f, password: '' }));
-      const saved = workspace.shops.find((shop) => shop.account === form.account.trim());
+      // 服务端会把账号归一化，回查必须按归一化键，不能拿原文比。
+      const saved = workspace.shops.find((shop) => accountKey(shop.account) === accountKey(account));
       if (!saved) throw Error('店铺已保存，请重新打开店铺管理核对');
       await onSaved(saved.id);
       onClose();
@@ -1429,15 +1490,19 @@ export function ShopEditor({
               <label>
                 店铺名称
                 <input
-                  data-autofocus={nameEditable ? '' : undefined}
-                  value={shopName}
-                  readOnly={!nameEditable}
-                  required={nameEditable}
+                  data-autofocus={initial ? '' : undefined}
+                  value={form.name}
+                  required
                   maxLength={50}
                   placeholder={
-                    initial ? '填写与后台一致的店铺名称' : '由登录账号中冒号前的店铺名自动生成'
+                    suggestedName
+                      ? `与后台一致的名称，例如「${suggestedName}」`
+                      : '填写与后台一致的店铺名称'
                   }
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  onChange={(e) => {
+                    setNameTouched(true);
+                    setForm((f) => ({ ...f, name: e.target.value }));
+                  }}
                 />
               </label>
               <label>
@@ -1466,9 +1531,15 @@ export function ShopEditor({
                 />
               </label>
             </fieldset>
-            {!initial ? (
+            {accountHint || !initial ? (
               <p className="quiet-note" id="account-format">
-                {meta.accountHint}
+                {accountHint || meta.accountHint}
+              </p>
+            ) : null}
+            {initial?.mallId && initial?.userId ? (
+              <p className="quiet-note">
+                已绑定后台店铺 {initial.mallId} · 账号 {initial.userId}；核对时比较这两个编号，不再看页面文字。
+                更换登录账号后需重新登录核对一次。
               </p>
             ) : null}
             <p className="quiet-note">
@@ -1675,3 +1746,177 @@ export function ShopPicker({
 }
 export const maskAccount = (account: string) =>
   /^\d{11}$/.test(account) ? `${account.slice(0, 3)}****${account.slice(-4)}` : account;
+
+/**
+ * 到店安装：表格里填的是意图（要不要装、装到店还是到家、用哪个模板），
+ * 这里让人在保存前看见它，必要时就地改。模板名留到执行时换 SIST_ 编号，
+ * 解析结果落在 apiDraft.installTemplateId，已经解析过就把编号显示出来。
+ */
+function InstallEditor(props: {
+  product: Product;
+  update: (fn: (p: Product) => Product) => void;
+}) {
+  const { product, update } = props;
+  const taobao = Boolean(product.taobao);
+  const install = product.install;
+  const total = product.skus.length;
+  const withRim = product.skus.filter((sku) => sku.rim).length;
+  // 开着到店安装却有空行时，打开就按规格补上——后台那一列是必填，没必要让人逐行点。
+  useEffect(() => {
+    if (taobao || !install || total === 0 || withRim === total) return;
+    update((p) => ({
+      ...p,
+      skus: p.skus.map((sku) =>
+        sku.rim
+          ? sku
+          : {
+              ...sku,
+              rim:
+                rimDiameterLabel(
+                  ...(sku.options || []).map((option) => option.value),
+                  p.title,
+                ) || "",
+            },
+      ),
+    }));
+  }, [taobao, Boolean(install), total, withRim]);
+  // 后台模板做成下拉：名字每次都不一样，运营不该记 SIST_ 编号。
+  const [templates, setTemplates] = useState<{ label: string; value: string }[]>([]);
+  const [templateNote, setTemplateNote] = useState("");
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const readTemplates = async () => {
+    setLoadingTemplates(true);
+    setTemplateNote("");
+    try {
+      const list = await window.desktop.installTemplates(product.id);
+      setTemplates(list);
+      if (!list.length) setTemplateNote("后台一个模板也没有，请先到拼多多后台新建到店安装模板。");
+      else if (list.length === 1) {
+        applyTemplate(list[0]);
+        setTemplateNote(`后台只有一个模板「${list[0].label}」，已经选上并记到这家店了。`);
+      } else setTemplateNote(`读到 ${list.length} 个模板，选一个就会记到这家店，下次新建商品自动带上。`);
+    } catch (error) {
+      setTemplateNote(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+  const applyTemplate = (option: { label: string; value: string }) => {
+    update((p) => ({
+      ...p,
+      install: {
+        delivery: p.install?.delivery ?? "store",
+        template: option.value,
+      },
+    }));
+    void window.desktop
+      .bindInstallTemplate(product.id, { id: option.value, label: option.label })
+      .catch(() => undefined);
+  };
+  if (taobao) return null;
+  const patch = (field: "delivery" | "template", value: string) =>
+    update((p) => ({
+      ...p,
+      install: {
+        delivery: field === "delivery" ? (value as "store" | "home") : p.install?.delivery ?? "store",
+        template: field === "template" ? value : p.install?.template ?? "",
+      },
+    }));
+  return (
+    <>
+      <div className="section-title">
+        <h3>到店安装</h3>
+      </div>
+      {install ? (
+        <div className="install-block">
+          <div className="field-grid">
+            <label>
+              安装类型
+              <select value={install.delivery} onChange={(e) => patch("delivery", e.target.value)}>
+                <option value="store">配送到店</option>
+                <option value="home">配送到家</option>
+              </select>
+            </label>
+            <label>
+              后台模板
+              <select
+                value={install.template}
+                onChange={(e) => {
+                  const picked = templates.find((option) => option.value === e.target.value);
+                  if (picked) applyTemplate(picked);
+                  else patch("template", e.target.value);
+                }}
+              >
+                <option value="">点右边「读取后台模板」再选</option>
+                {install.template && !templates.some((option) => option.value === install.template) ? (
+                  <option value={install.template}>{install.template}</option>
+                ) : null}
+                {templates.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="install-foot">
+            <p className="quiet-note">
+            {withRim < total
+              ? `轮辋直径 ${withRim}/${total} 行已填，缺的行后台会拒绝提交。`
+              : `轮辋直径 ${total} 行齐全。`}
+            {" 执行时按名称到后台下拉里换成 SIST_ 开头模板编号，换不到会停下来告诉你后台有哪些模板。"}
+            </p>
+            <button
+              type="button"
+              className="button"
+              onClick={() =>
+                update((p) => ({
+                  ...p,
+                  skus: p.skus.map((sku) =>
+                    sku.rim
+                      ? sku
+                      : {
+                          ...sku,
+                          rim:
+                            rimDiameterLabel(
+                              ...(sku.options || []).map((option) => option.value),
+                              p.title,
+                            ) || "",
+                        },
+                  ),
+                }))
+              }
+            >
+              按规格自动填轮辋直径
+            </button>
+            <button
+              type="button"
+              className="button"
+              disabled={loadingTemplates}
+              onClick={() => void readTemplates()}
+            >
+              {loadingTemplates ? "读取中…" : "读取后台模板"}
+            </button>
+          </div>
+          {templateNote ? <p className="quiet-note">{templateNote}</p> : null}
+        </div>
+      ) : (
+        <div className="install-block install-empty">
+          <div className="install-copy">
+            <strong>未开启</strong>
+            <p className="quiet-note">
+              表格「到店安装」填「是」即开启。开启后后台的「价格及库存」会多出一列必填的轮辋直径。
+            </p>
+          </div>
+          <button
+            type="button"
+            className="button"
+            onClick={() => update((p) => ({ ...p, install: { delivery: "store", template: "" } }))}
+          >
+            开启到店安装
+          </button>
+        </div>
+      )}
+    </>
+  );
+}

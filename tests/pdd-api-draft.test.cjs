@@ -2,6 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   apiCents,
+  apiInvoice,
+  apiInstallPair,
+  apiRim,
+  apiInstallType,
   apiCategory,
   apiProperties,
   assertApiMatrix,
@@ -262,4 +266,336 @@ test('草稿列表索引延迟时只重复查询，不重建或保存，唯一�
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+const vm = require('node:vm');
+const { pageApiScript } = require('../dist-electron/electron/platforms/pdd-api-draft.js');
+
+// 页面守卫跑在真实页面里：header 上的子账号带真实姓名后缀，
+// 只比整行文字就会把「已登录」判成「换了账号」，这曾经让类目接口报 shop_changed。
+function livePage(options = {}) {
+  const lines = options.names || [
+    '规则中心',
+    '邓禄普黑豆专卖店',
+    '邓禄普:珠珠(王玮珠)',
+    '退出当前账号',
+  ];
+  const calls = [];
+  const header = { innerText: lines.join('\n'), textContent: lines.join(' ') };
+  const userinfo =
+    options.userinfo === null
+      ? null
+      : {
+          id: options.userId ?? 190551753,
+          mall_id: 549046886,
+          username: '邓禄普:珠珠',
+          nickname: '王玮珠',
+          mall: { mall_id: 549046886, mall_name: '邓禄普黑豆专卖店' },
+        };
+  const sandbox = {
+    location: { origin: 'https://mms.pinduoduo.com' },
+    document: { querySelector: (selector) => (selector === 'header' ? header : null) },
+    localStorage: { getItem: (key) => (key === 'new_userinfo' && userinfo ? JSON.stringify(userinfo) : null) },
+    window: {
+      __mms: {
+        fetch: {
+          get: async (route, body) => {
+            calls.push([route, body]);
+            return { cat_info_v2_lists: [{ optional: true, cat_name_1: '末级类目', cat_id_1: 101 }] };
+          },
+          post: async () => ({}),
+        },
+      },
+    },
+  };
+  sandbox.window.__user = userinfo ? { id: userinfo.id, mallId: userinfo.mall_id } : undefined;
+  return { sandbox, calls };
+}
+
+const runApi = async (shop, options) => {
+  const { sandbox, calls } = livePage(options);
+  const result = await vm.runInNewContext(
+    pageApiScript({ route: '/vodka/v2/mms/search/categories/v2', method: 'get', body: { keyword: '乘用车轮胎' } }, shop),
+    sandbox,
+  );
+  return { result, calls };
+};
+
+test('类目接口在带真实姓名后缀的已登录页面里照常请求', async () => {
+  const shop = { name: '邓禄普黑豆专卖店', account: '邓禄普:珠珠' };
+  const { result, calls } = await runApi(shop);
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], '/vodka/v2/mms/search/categories/v2');
+  // 页面沙箱里的对象来自另一个 realm，只能按序列化值比较。
+  assert.equal(JSON.stringify(calls[0][1]), JSON.stringify({ keyword: '乘用车轮胎' }));
+});
+
+test('类目接口不会为别的子账号放行，绑定编号不符时同样拦下', async () => {
+  const other = await runApi({ name: '邓禄普黑豆专卖店', account: '邓禄普:阿珍' });
+  assert.equal(other.result.ok, false);
+  assert.equal(other.result.identity, true);
+  assert.equal(other.calls.length, 0);
+
+  const bound = { name: '邓禄普黑豆专卖店', account: '邓禄普:珠珠', mallId: 549046886, userId: 190551753 };
+  assert.equal((await runApi(bound)).result.ok, true);
+  const stranger = await runApi(bound, { userId: 190551754 });
+  assert.equal(stranger.result.ok, false);
+  assert.equal(stranger.result.identity, true);
+  assert.equal(stranger.calls.length, 0);
+});
+
+test('类目不提供正品发票时资料填“是”按不勾选执行，不阻断任务', () => {
+  const tire = {
+    authentic_invoice: false,
+    is_electronic_invoice: false,
+    is_paper_invoice: false,
+    allow_invoice_sub_type: false,
+    must_set_invoice: false,
+  };
+  assert.equal(JSON.stringify(apiInvoice(true, tire)), JSON.stringify({ invoice: 0, offers: false }));
+  assert.equal(JSON.stringify(apiInvoice(false, tire)), JSON.stringify({ invoice: 0, offers: false }));
+});
+
+test('类目提供发票服务时资料填“是”仍拒绝静默设置发票类型', () => {
+  assert.equal(JSON.stringify(apiInvoice(true, { authentic_invoice: true })), JSON.stringify({ invoice: 1, offers: true }));
+  assert.equal(JSON.stringify(apiInvoice(true, { is_electronic_invoice: true })), JSON.stringify({ invoice: 1, offers: true }));
+  assert.equal(JSON.stringify(apiInvoice(false, { authentic_invoice: true })), JSON.stringify({ invoice: 0, offers: true }));
+});
+
+test('发票规则的数组写法与缺省键不会被当成已提供', () => {
+  assert.equal(apiInvoice(true, { allow_invoice_sub_type: [1, 2] }).offers, true);
+  assert.equal(apiInvoice(true, { allow_invoice_sub_type: [] }).offers, false);
+  assert.equal(apiInvoice(true, { authentic_invoice: 'true' }).offers, false);
+  assert.equal(apiInvoice(true, {}).offers, false);
+});
+
+test('到店安装：模板 ID 写进 srv_template_id_map，键按安装类型走', () => {
+  assert.equal(apiInstallType('store'), '2');
+  assert.equal(apiInstallType('home'), '3');
+  assert.equal(
+    JSON.stringify(apiInstallPair('store', 'SIST_418714932725772662')),
+    JSON.stringify({ '2': 'SIST_418714932725772662' }),
+  );
+  assert.equal(JSON.stringify(apiInstallPair('home', ' SIST_abc-1 ')), JSON.stringify({ '3': 'SIST_abc-1' }));
+});
+
+test('到店安装：还没换成模板 ID 时明确拒绝', () => {
+  assert.throws(() => apiInstallPair('store', '到店模版1'), /到店安装模板还没换成后台模板 ID/);
+  assert.throws(() => apiInstallPair('store', 'SIST_'), /到店安装模板/);
+  assert.throws(() => apiInstallPair('store', ''), /到店安装模板/);
+});
+
+test('到店安装：填中文模板名时从下拉项里把模板 ID 挖出来', async () => {
+  const vm = require('node:vm');
+  const { PDD_TEMPLATE_LOOKUP } = require('../dist-electron/electron/platforms/pdd-api-draft.js');
+  const option = (label, value) => ({
+    textContent: label,
+    click() {},
+    ['__reactInternalInstance$abc']: { memoizedProps: { option: { label, value } }, return: null },
+  });
+  const run = async (name, labels) => {
+    const items = labels.map(([label, value]) => option(label, value));
+    const headers = [{ click() {}, parentElement: { parentElement: { innerText: '配送到店模板' } } }];
+    const sandbox = {
+      document: {
+        getElementById: () => null,
+        querySelector: () => null,
+        querySelectorAll: (selector) => {
+          if (selector.includes('option')) return items;
+          if (selector.includes('label')) return [];
+          if (selector.includes('header')) return headers;
+          return [];
+        },
+      },
+      setTimeout: (fn) => {
+        fn();
+        return 0;
+      },
+      Promise,
+    };
+    const lookup = vm.runInNewContext(`(${PDD_TEMPLATE_LOOKUP.toString()})`, sandbox);
+    return lookup(name);
+  };
+
+  const matched = await run('到店模版1', [['到店模版1', 'SIST_418714932725772662']]);
+  assert.equal(matched.ok, true);
+  assert.equal(matched.id, 'SIST_418714932725772662');
+
+  // 「模板」和「模版」两种写法都认，空格与全角括号忽略
+  const loose = await run(' 到店模板 1 ', [['到店模版1', 'SIST_418714932725772662']]);
+  assert.equal(loose.ok, true);
+  assert.equal(loose.id, 'SIST_418714932725772662');
+
+  const missing = await run('到店模版9', [['到店模版1', 'SIST_418714932725772662']]);
+  assert.equal(missing.ok, false);
+  assert.equal(missing.options[0].label, '到店模版1');
+  assert.match(missing.reason, /没有这个模板/);
+});
+
+test('到店安装：老资料没算轮辋直径时按规格选项与标题自动推', () => {
+  const product = {
+    title: '邓禄普 汽车轮胎 215/55R18 95V FM800',
+    install: { delivery: 'store', template: 'SIST_418714932725772662' },
+    skus: [{ options: [{ name: '型号', value: '205/45R17 88W XL SPORT MAXX LUX SC' }] }],
+  };
+  assert.equal(apiRim(product, product.skus[0]), '17英寸', '规格里没写直径时也要能推出来');
+  assert.equal(apiRim({ ...product, install: undefined }, product.skus[0]), '', '没开到店安装就不写这一项');
+  assert.equal(apiRim(product, { options: [{ name: '型号', value: '245/40R19 防爆胎' }] }), '防爆胎19英寸');
+  assert.equal(apiRim(product, { rim: '20英寸', options: [] }), '20英寸', '导入时算好的直接用');
+});
+test('到店安装：面板没展开、复选框没勾时自动展开勾选再取模板', async () => {
+  const vm = require('node:vm');
+  const { PDD_TEMPLATE_LOOKUP } = require('../dist-electron/electron/platforms/pdd-api-draft.js');
+  const clicked = [];
+  const header = { click() {}, parentElement: { parentElement: { innerText: '配送到店模板' } } };
+  const box = { querySelector: (selector) => (selector.includes('header') ? header : null) };
+  const items = [
+    {
+      textContent: '到店模版1',
+      click() {},
+      ['__reactInternalInstance$auto']: {
+        memoizedProps: { option: { label: '到店模版1', value: 'SIST_auto_1' } },
+        return: null,
+      },
+    },
+  ];
+  let checked = false;
+  let ready = false;
+  const input = {
+    type: 'checkbox',
+    get checked() {
+      return checked;
+    },
+    click() {
+      checked = true;
+      ready = true;
+    },
+    closest: () => labelWrap,
+  };
+  const labelWrap = {
+    textContent: '到店安装',
+    querySelector: () => input,
+    click() {
+      input.click();
+    },
+  };
+  const expand = { textContent: '展开修改', click: () => clicked.push('expand') };
+  const sandbox = {
+    document: {
+      getElementById: () => (ready ? box : null),
+      querySelector: () => null,
+      querySelectorAll: (selector) => {
+        if (selector.includes('option')) return items;
+        if (selector.includes('label')) return [labelWrap];
+        if (selector.includes('header')) return [header];
+        if (selector === 'button,a,span,div') return [expand];
+        return [];
+      },
+    },
+    setTimeout: (fn) => {
+      fn();
+      return 0;
+    },
+    Promise,
+  };
+  const lookup = vm.runInNewContext(`(${PDD_TEMPLATE_LOOKUP.toString()})`, sandbox);
+  const result = await lookup('到店模版1');
+  assert.equal(clicked.length, 1, '页面收起时先点「展开修改」');
+  assert.equal(checked, true, '「到店安装」没勾时自动勾上');
+  assert.equal(result.ok, true);
+  assert.equal(result.id, 'SIST_auto_1');
+});
+
+test('到店安装：类目没有「到店安装」入口时给出可核对的原因', async () => {
+  const vm = require('node:vm');
+  const { PDD_TEMPLATE_LOOKUP } = require('../dist-electron/electron/platforms/pdd-api-draft.js');
+  const sandbox = {
+    document: {
+      getElementById: () => null,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    },
+    setTimeout: (fn) => {
+      fn();
+      return 0;
+    },
+    Promise,
+  };
+  const lookup = vm.runInNewContext(`(${PDD_TEMPLATE_LOOKUP.toString()})`, sandbox);
+  const result = await lookup('到店模版1');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /找不到「到店安装」勾选项/);
+});
+test('到店安装：按真实页面结构（更多服务分组 + bottom-switch）展开后读到模板清单', async () => {
+  const vm = require('node:vm');
+  const { PDD_TEMPLATE_OPTIONS } = require('../dist-electron/electron/platforms/pdd-api-draft.js');
+  const clicked = [];
+  const header = { click() {}, parentElement: { parentElement: { innerText: '配送到店模板' } } };
+  const box = { querySelector: (selector) => (selector.includes('header') ? header : null) };
+  const items = [
+    {
+      textContent: '到店模版1',
+      click() {},
+      ['__reactInternalInstance$real']: {
+        memoizedProps: { option: { label: '到店模版1', value: 'SIST_real_1' } },
+        return: null,
+      },
+    },
+  ];
+  let expanded = false;
+  const toggle = {
+    click: () => {
+      clicked.push('bottom-switch');
+      expanded = true;
+    },
+  };
+  const groupLabel = {
+    textContent: '更多服务',
+    parentElement: { querySelector: (selector) => (selector === '.bottom-switch' ? toggle : null) },
+  };
+  let checked = false;
+  const input = {
+    type: 'checkbox',
+    get checked() {
+      return checked;
+    },
+    click: () => {
+      checked = true;
+    },
+    closest: () => labelWrap,
+  };
+  const labelWrap = {
+    textContent: '到店安装（勾选即表示同意《到店安装服务条款》）',
+    querySelector: () => input,
+    click: () => input.click(),
+  };
+  const sandbox = {
+    document: {
+      getElementById: () => (checked ? box : null),
+      querySelector: () => null,
+      querySelectorAll: (selector) => {
+        if (selector === '.mui-form-group-label') return [groupLabel];
+        if (selector.includes('option')) return items;
+        if (selector.includes('label')) return [labelWrap];
+        if (selector.includes('header')) return [header];
+        void expanded;
+        return [];
+      },
+    },
+    setTimeout: (fn) => {
+      fn();
+      return 0;
+    },
+    Promise,
+  };
+  const read = vm.runInNewContext(`(${PDD_TEMPLATE_OPTIONS.toString()})`, sandbox);
+  const result = await read();
+  assert.equal(clicked.length, 1, '先点分组里的 bottom-switch 展开「更多服务」');
+  assert.equal(checked, true, '没勾时自动勾上「到店安装」');
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(result.options)),
+    [{ label: '到店模版1', value: 'SIST_real_1' }],
+  );
 });

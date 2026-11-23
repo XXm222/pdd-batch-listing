@@ -3,3 +3,4 @@ allowBuilds:
   electron: true
   esbuild: true
   electron-winstaller: false
+  ffmpeg-static: set this to true or false

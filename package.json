@@ -1,7 +1,7 @@
 {
   "name": "goods-workspace",
   "productName": "商品运营台",
-  "version": "0.1.64",
+  "version": "0.1.65",
   "private": true,
   "description": "商品资料导入与店铺草稿工作台",
   "author": "商品运营台项目",
@@ -35,6 +35,7 @@
     "electron": "44.4.0",
     "electron-builder": "26.15.3",
     "lucide-react": "1.48.0",
+    "playwright": "1.65.1",
     "prettier": "3.9.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",

@@ -8,9 +8,14 @@ const {
 } = require('../dist-electron/electron/platforms/pdd-login');
 const {
   matchesPddIdentity,
+  matchesPddLogin,
+  pddAnchorVerdict,
+  readPddAnchor,
+  PDD_ANCHOR_READ,
   PDD_IDENTITY_MATCH,
-  isPddLoginConfirmed,
   PDD_LOGIN_CONFIRMED,
+  PDD_LOGIN_MATCH,
+  isPddLoginConfirmed,
 } = require('../dist-electron/electron/platforms/pdd-identity');
 const { ExecutionError } = require('../dist-electron/electron/execution');
 
@@ -350,6 +355,70 @@ test('host and embedded page identity guards enforce the same narrowly scoped no
   }
 });
 
+// The live backend header for 店铺「邓禄普黑豆专卖店」/ 账号「邓禄普:珠珠」 reads:
+//   邓禄普黑豆专卖店
+//   邓禄普:珠珠(王玮珠)
+// The main account is not the shop name and the subaccount carries a real name.
+const liveShop = { name: '邓禄普黑豆专卖店', account: '邓禄普:珠珠' };
+const liveNames = ['规则中心', liveShop.name, '邓禄普:珠珠(王玮珠)', '退出当前账号'];
+
+test('a real-name suffix on the subaccount does not hide a correctly signed-in identity', () => {
+  assert.equal(matchesPddIdentity(liveNames, liveShop), true);
+  assert.equal(
+    isPddLoginConfirmed(
+      { trusted: true, names: liveNames, loginPage: false, form: false, rejected: false, challenge: false },
+      liveShop,
+    ),
+    true,
+  );
+  const pageMatch = vm.runInNewContext(`(${PDD_IDENTITY_MATCH})`);
+  const pageConfirm = vm.runInNewContext(`(${PDD_LOGIN_CONFIRMED})`);
+  assert.equal(pageMatch(liveNames, liveShop), true);
+  assert.equal(
+    pageConfirm(
+      { trusted: true, names: liveNames, loginPage: false, form: false, rejected: false, challenge: false },
+      liveShop,
+    ),
+    true,
+  );
+  // Without the shop name on its own the pair stays unconfirmed, as before.
+  assert.equal(pageMatch(['邓禄普:珠珠(王玮珠)'], liveShop), false);
+});
+
+test('a real-name suffix never accepts a different subaccount and stays single-identity', () => {
+  assert.equal(matchesPddIdentity([liveShop.name, '邓禄普:阿珍(李珍)'], liveShop), false);
+  assert.equal(
+    matchesPddIdentity([liveShop.name, '邓禄普:珠珠(王玮珠)', '邓禄普:阿珍(李珍)'], liveShop),
+    false,
+  );
+});
+
+test('a saved account that itself carries a real name still matches the header line', () => {
+  const saved = { ...liveShop, account: '邓禄普:珠珠(王玮珠)' };
+  assert.equal(matchesPddIdentity([liveShop.name, '邓禄普:珠珠(王玮珠)'], saved), true);
+  assert.equal(matchesPddIdentity([liveShop.name, '邓禄普:珠珠'], saved), true);
+});
+
+test('the live header reuses the signed-in subaccount without reading credentials', async () => {
+  const f = fixture({ signedIn: true, loginPage: false, names: liveNames });
+  await f.login.run(liveShop);
+  assert.equal(f.decrypts(), 0);
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.events.at(-1).name, '核对店铺与登录账号');
+  assert.equal(f.events.at(-1).status, 'done');
+});
+
+test('checking a different subaccount under the same main account reports the mismatch', async () => {
+  const f = fixture({
+    signedIn: true,
+    loginPage: false,
+    names: [liveShop.name, '邓禄普:阿珍(李珍)', '退出当前账号'],
+  });
+  await assert.rejects(f.login.run(liveShop, 'check'), (error) => /不一致/.test(error.message));
+  assert.equal(f.decrypts(), 0);
+  assert.deepEqual(f.calls, []);
+});
+
 test('a masked subaccount is treated as unknown identity rather than logged-out', async () => {
   const state = readState(`${shop.name}\n${shop.name}:***\n退出当前账号`, null);
   assert.equal(state.signedIn, true);
@@ -436,4 +505,101 @@ test('post-submit identity failures distinguish a different shop from a differen
     assert.equal(f.calls.filter((value) => value === 'submit-login').length, 1);
     assert.equal(f.calls.includes('logout'), false);
   }
+});
+
+const boundShop = {
+  name: '邓禄普黑豆专卖店',
+  account: '邓禄普:珠珠',
+  mallId: 549046886,
+  userId: 190551753,
+};
+const liveAnchor = {
+  mallId: 549046886,
+  userId: 190551753,
+  username: '邓禄普:珠珠',
+  nickname: '王玮珠',
+  mallName: '邓禄普黑豆专卖店',
+};
+const signedInOnly = () => ({ ...readState('退出当前账号', null), anchor: liveAnchor });
+
+test('a saved backend binding confirms the shop even when the header text carries no account', async () => {
+  const f = fixture(signedInOnly());
+  await f.login.run(boundShop, 'check');
+  assert.equal(f.decrypts(), 0);
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.events.at(-1).status, 'done');
+  // 核对通过后把后台编号交给调用方，用来回填店铺绑定。
+  assert.equal(f.login.anchor.mallId, 549046886);
+  assert.equal(f.login.anchor.userId, 190551753);
+});
+
+test('a different backend account under a plausible header is a binding mismatch', async () => {
+  const f = fixture({
+    ...readState(`${boundShop.name}\n邓禄普:阿珍(李珍)\n退出当前账号`, null),
+    anchor: { ...liveAnchor, userId: 190551754 },
+  });
+  await assert.rejects(f.login.run(boundShop, 'check'), (error) => /绑定不一致/.test(error.message));
+  assert.equal(f.decrypts(), 0);
+  assert.deepEqual(f.calls, []);
+});
+
+test('an unbound shop never trusts the page anchor and keeps the text rules', async () => {
+  const unbound = { name: boundShop.name, account: boundShop.account };
+  const f = fixture(signedInOnly());
+  await assert.rejects(
+    f.login.run(unbound, 'check'),
+    (error) => /店铺与账号信息未完整读取/.test(error.message),
+  );
+  assert.equal(f.decrypts(), 0);
+});
+
+test('binding verdicts never turn missing evidence into a mismatch', () => {
+  assert.equal(pddAnchorVerdict(undefined, boundShop), 'unknown');
+  assert.equal(pddAnchorVerdict(liveAnchor, { name: '某店', account: '某店:运营' }), 'unknown');
+  assert.equal(pddAnchorVerdict({ mallId: 549046886 }, boundShop), 'unknown');
+  assert.equal(pddAnchorVerdict(liveAnchor, boundShop), 'bound');
+  assert.equal(pddAnchorVerdict({ ...liveAnchor, userId: 190551754 }, boundShop), 'mismatch');
+  assert.equal(pddAnchorVerdict({ ...liveAnchor, mallId: 549046887 }, boundShop), 'mismatch');
+  // 页面返回值先按形状收敛：字符串数字、非整数、空对象都不算证据。
+  assert.equal(readPddAnchor({ mallId: '549046886', userId: 190551753 }).mallId, undefined);
+  assert.equal(readPddAnchor({ userId: 1.5 }), undefined);
+  assert.equal(readPddAnchor({}), undefined);
+  assert.equal(readPddAnchor(null), undefined);
+});
+
+test('the page guards read and prefer the structured identity inside the browser', () => {
+  const base = {
+    trusted: true,
+    names: ['退出当前账号'],
+    loginPage: false,
+    form: false,
+    rejected: false,
+    challenge: false,
+  };
+  assert.equal(matchesPddLogin({ ...base, anchor: liveAnchor }, boundShop), true);
+  const match = vm.runInNewContext(`(${PDD_LOGIN_MATCH})`);
+  assert.equal(match({ ...base, anchor: liveAnchor }, boundShop), true);
+  assert.equal(match({ ...base, anchor: { ...liveAnchor, userId: 5 } }, boundShop), false);
+  // 没有绑定就退回文字规则：只有「退出当前账号」一行，认不出子账号。
+  assert.equal(
+    match({ ...base, anchor: liveAnchor }, { name: boundShop.name, account: boundShop.account }),
+    false,
+  );
+  const anchor = vm.runInNewContext(PDD_ANCHOR_READ, {
+    localStorage: {
+      getItem: () =>
+        JSON.stringify({
+          id: 190551753,
+          username: '邓禄普:珠珠',
+          mall: { mall_id: 549046886, mall_name: '邓禄普黑豆专卖店' },
+        }),
+    },
+    window: { __user: { id: 190551753, mallId: 549046886 } },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(anchor)), {
+    mallId: 549046886,
+    userId: 190551753,
+    username: '邓禄普:珠珠',
+    mallName: '邓禄普黑豆专卖店',
+  });
 });

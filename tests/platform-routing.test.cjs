@@ -187,3 +187,35 @@ test('淘宝连接信任登录页与工作台两个来源，其他来源一律�
     /HTTPS/,
   );
 });
+
+test('店铺记住的到店安装模板会自动补进任务，资料里的 SIST_ 仍然优先', async (t) => {
+  const pdd = await fixture(t, 'pdd');
+  const templateId = 'SIST_418714932725772662';
+  pdd.store.saveShop(
+    { ...pdd.shop, installTemplate: { id: templateId, label: '到店模版1' } },
+    'isolated-test-secret',
+  );
+  const withName = {
+    ...pdd.products[0],
+    code: 'PLATFORM-INSTALL',
+    install: { delivery: 'store', template: '到店模版1' },
+    skus: [{ spec: '默认规格', group: '30', single: '40', stock: '10', rim: '17英寸' }],
+  };
+  assert.deepEqual(problems(withName), []);
+  pdd.store.saveProducts([withName]);
+  const ids = prepareTasks(pdd.store, { shopId: pdd.shop.id, productIds: [withName.id] });
+  assert.equal(readTask(pdd.store, ids[0]).productSnapshot.install.template, templateId);
+
+  const explicit = {
+    ...withName,
+    code: 'PLATFORM-INSTALL-2',
+    install: { delivery: 'store', template: 'SIST_111111111111111111' },
+  };
+  assert.deepEqual(problems(explicit), []);
+  pdd.store.saveProducts([explicit]);
+  const taskIds = prepareTasks(pdd.store, { shopId: pdd.shop.id, productIds: [explicit.id] });
+  assert.equal(
+    readTask(pdd.store, taskIds[0]).productSnapshot.install.template,
+    'SIST_111111111111111111',
+  );
+});

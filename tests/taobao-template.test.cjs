@@ -57,8 +57,8 @@ test('淘宝示例模板解析出后台发品需要的全部字段', async () =>
     });
     // 天猫只有一个一口价，导入时两侧都写同一个值，下游按平台各取所需
     assert.equal(p.skus.length, 1);
-    assert.equal(p.skus[0].single, '90.99');
-    assert.equal(p.skus[0].group, '90.99');
+    assert.equal(p.skus[0].single, '91');
+    assert.equal(p.skus[0].group, '91');
     assert.equal(p.skus[0].stock, '2000');
     // 天猫 SKU 表没有编码列，淘宝模板已去掉「规格编码」，导入应留空而不是报错
     assert.equal(p.skus[0].code, '');

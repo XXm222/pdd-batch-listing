@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { Store } from './store';
+import type { ImportFailure } from './importer';
 import { prepareTasks, TaskRunner } from './task-runner';
 import { PlatformRegistry } from './platforms/registry';
 import { ShopLoginError } from './platforms/shop-login';
@@ -151,7 +152,7 @@ function workerImport(data: {
   files?: string[];
   folder?: string;
   withImages: boolean;
-}): Promise<{ products: Product[]; assets: Asset[] }> {
+}): Promise<{ products: Product[]; assets: Asset[]; failures: ImportFailure[] }> {
   return new Promise((resolve, reject) => {
     const workerRoot = app.isPackaged
       ? __dirname.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`)
@@ -285,6 +286,14 @@ else {
         return decrypted.result;
       };
       const platforms = new PlatformRegistry(app.getPath('userData'), decryptShopPassword);
+      /** 资料上记的店铺名 → 店铺记录；只有一个店铺时直接用它。 */
+      const productShop = (product: Product): Shop => {
+        const shops = store.all<Shop>('shops');
+        const named = shops.find((s) => s.name === product.expectedShop);
+        if (named) return named;
+        if (shops.length === 1) return shops[0];
+        throw new Error(`找不到店铺「${product.expectedShop}」，请先在店铺管理里添加`);
+      };
       runner = new TaskRunner(
         store,
         app.getPath('userData'),
@@ -561,7 +570,7 @@ else {
             for (const p of result.products)
               if (workspace().products.some((existing) => existing.code === p.code))
                 p.code = `DEMO-FB-${Date.now().toString().slice(-8)}`;
-          return result.products;
+          return { products: result.products, failures: result.failures };
         } finally {
           importing = false;
         }
@@ -688,6 +697,50 @@ else {
         true,
       );
       handler(
+        'shops:install-templates',
+        async (productId: unknown) => {
+          if (typeof productId !== 'string' || !productId) throw new Error('商品参数不正确');
+          const product = store.all<Product>('products').find((p) => p.id === productId);
+          if (!product) throw new Error('商品不存在，请先保存资料');
+          const shop = productShop(product);
+          const read = platforms.forShop(shop).installTemplates;
+          if (!read) throw new Error('当前平台不支持到店安装模板');
+          await requireBrowser(shop.platform);
+          // 优先用这件商品最近的草稿编辑页；没有再退到这家店任意一件草的编辑页
+          // （模板是店铺级的，随便哪个编辑页的下拉都一样）。
+          const mine = store
+            .all<Task>('tasks')
+            .filter((t) => t.shopId === shop.id && t.goodsId && t.apiDraft?.commitId)
+            .sort((a, b) => (a.time < b.time ? 1 : -1));
+          const latest =
+            mine.find((t) => t.productSnapshot?.id === product.id) ?? mine[0];
+          const editUrl = latest
+            ? `https://mms.pinduoduo.com/goods/goods_add/index?id=${latest.apiDraft!.commitId}&goods_id=${latest.goodsId}&type=edit`
+            : undefined;
+          return read(shop, editUrl);
+        },
+        true,
+      );
+      handler(
+        'shops:bind-template',
+        async (input: { productId: string; template: { id: string; label: string } }) => {
+          if (!input || typeof input.productId !== 'string' || !input.productId)
+            throw new Error('模板参数不正确');
+          const product = store.all<Product>('products').find((p) => p.id === input.productId);
+          if (!product) throw new Error('商品不存在，请先保存资料');
+          const template = input.template;
+          if (!template || typeof template.id !== 'string' || !template.id.startsWith('SIST_'))
+            throw new Error('模板编号不正确：应为后台的 SIST_ 开头 ID');
+          const shop = productShop(product);
+          store.bindInstallTemplate(shop.id, {
+            id: template.id.slice(0, 200),
+            label: String(template.label ?? '').slice(0, 200),
+          });
+          return workspace();
+        },
+        true,
+      );
+      handler(
         'shops:login',
         async (input: { id: string; mode: 'relogin' | 'check' }) => {
           guardAgent();
@@ -719,7 +772,7 @@ else {
           };
           emit();
           try {
-            await platforms.forShop(shop).verifyLogin(shop, input.mode, (event) => {
+            const anchor = await platforms.forShop(shop).verifyLogin(shop, input.mode, (event) => {
               const index = result.events.findIndex(
                 (e) => e.name === event.name && e.startedAt === event.startedAt,
               );
@@ -729,12 +782,18 @@ else {
               emit();
             });
             result.status = 'succeeded';
+            // 核对通过即落库：以后只比后台编号，不再依赖页面文字怎么渲染。
+            const bound =
+              anchor?.mallId && anchor?.userId
+                ? store.bindShopIdentity(shop.id, { mallId: anchor.mallId, userId: anchor.userId })
+                : undefined;
             result.message =
-              normalizePlatform(shop.platform) === 'taobao'
-                ? `已登录千牛并核对店铺“${shop.name}”`
+              (normalizePlatform(shop.platform) === 'taobao'
+                ? `已登录千牛并核对店铺「${shop.name}」`
                 : shop.account.includes(':')
-                  ? `已登录并核对“${shop.name}”及子账号`
-                  : `已登录并核对“${shop.name}”；后台未提供可完整核对的登录账号`;
+                  ? `已登录并核对「${shop.name}」及子账号`
+                  : `已登录并核对「${shop.name}」；后台未提供可完整核对的登录账号`) +
+              (bound?.mallId ? `；已绑定后台店铺 ${bound.mallId}` : '');
           } catch (error) {
             result.status = error instanceof ShopLoginError ? error.loginStatus : 'failed';
             result.errorCode = error instanceof ExecutionError ? error.code : undefined;

@@ -2,6 +2,7 @@ import { useId, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, ImagePlus, Trash2 } from 'lucide-react';
 import type { Asset, ImageTarget, Product, Sku } from './types';
 import { imageSizeText, isTaobaoProduct, missingSkuImages, withSkuOptions } from './domain';
+import { RIM_OPTIONS } from './pdd-rim';
 
 export function SkuEditor({
   product,
@@ -21,6 +22,10 @@ export function SkuEditor({
   const helpId = useId();
   const missingImages = missingSkuImages(product);
   const taobao = isTaobaoProduct(product);
+  /** 到店安装开启后，后台的「价格及库存」表会多一列必填的轮辋直径，这里跟着露出来。 */
+  const showRim = !taobao && Boolean(product.install);
+  /** 后台「*库存」必填，0 在编辑页里就是空输入框，这里给出一次性填 1 的入口。 */
+  const zeroStock = product.skus.filter((sku) => sku.stock === '' || sku.stock === '0');
   const names = [0, 1].map((i) => product.skus[0]?.options?.[i]?.name || '');
   const optionsFor = (sku: Sku) =>
     Array.from({ length: Math.max(2, sku.options?.length || 0) }, (_, i) => ({
@@ -102,6 +107,27 @@ export function SkuEditor({
           {missingImages.length} 个组合未添加规格图，请在对应行添加；是否必填按后台类目要求。
         </p>
       ) : null}
+      {zeroStock.length ? (
+        <div className="sku-bulk" role="status">
+          <span>
+            {zeroStock.length} 个组合的库存是 0 或空。后台「*库存」是必填，0 在编辑页里等于没填，提交会被拦。
+          </span>
+          <button
+            type="button"
+            className="button"
+            disabled={disabled}
+            onClick={() =>
+              onChange(
+                product.skus.map((sku) =>
+                  sku.stock === '' || sku.stock === '0' ? { ...sku, stock: '1' } : sku,
+                ),
+              )
+            }
+          >
+            全部设为 1 件
+          </button>
+        </div>
+      ) : null}
       <div className="table-scroll sku-grid-scroll">
         <table className="sku-grid">
           <thead>
@@ -113,6 +139,7 @@ export function SkuEditor({
               {prices.map((price) => (
                 <th key={price.key}>{price.label}</th>
               ))}
+              {showRim ? <th>轮辋直径</th> : null}
               <th>规格编码</th>
               <th className="sku-actions-col">
                 <span className="sr-only">操作</span>
@@ -189,6 +216,23 @@ export function SkuEditor({
                     />
                   </td>
                 ))}
+                {showRim ? (
+                  <td>
+                    <select
+                      disabled={disabled}
+                      aria-label={`组合 ${index + 1} 轮辋直径`}
+                      value={sku.rim || ''}
+                      onChange={(e) => change(index, { rim: e.target.value })}
+                    >
+                      <option value="">按规格推导</option>
+                      {RIM_OPTIONS.map((label) => (
+                        <option key={label} value={label}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                ) : null}
                 <td>
                   <input
                     disabled={disabled}

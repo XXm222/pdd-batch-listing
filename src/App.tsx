@@ -38,11 +38,12 @@ import { AgentSettings } from './AgentSettings';
 import { ShopLogin } from './ShopLogin';
 import { BrowserSetup } from './BrowserSetup';
 import { isTaobaoProduct, lowestPrice, missingSkuImages, problems } from './domain';
+import { preflightNotice } from './product-checks';
 import { DEFAULT_PLATFORM, PLATFORM_ORDER, platformMeta, type PlatformId } from './platforms';
 import { productList } from './product-list';
 import { mergeWorkspace, applyTaskUpdate } from './workspace-state';
 import { TemplateDownload } from './TemplateDownload';
-import { Modal, Recognition, ShopEditor, ShopManagement, ShopPicker, Status } from './components';
+import { Recognition, ShopEditor, ShopManagement, ShopPicker, Status } from './components';
 
 type Page = 'products' | 'shops' | 'tasks' | 'collection';
 const pages: Record<Page, string> = {
@@ -94,7 +95,6 @@ export default function App() {
   const [listPage, setListPage] = useState(0);
   const [savingTemplate, setSavingTemplate] = useState<'blank' | 'example' | null>(null);
   const [templatePlatform, setTemplatePlatform] = useState<PlatformId>(DEFAULT_PLATFORM);
-  const [folderPending, setFolderPending] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [notesSeenVersion, setNotesSeenVersion] = useState(() => {
@@ -255,8 +255,20 @@ export default function App() {
     if (busy) return;
     setBusy(true);
     try {
-      const products = await window.desktop.importData(kind);
-      if (products) setPending(products);
+      const result = await window.desktop.importData(kind);
+      if (!result) return;
+      if (result.products.length) setPending(result.products);
+      if (result.failures.length) {
+        const first = result.failures[0];
+        setNotice(
+          result.products.length
+            ? `${result.failures.length} 份资料未通过，其余已导入。第一份「${first.file}」：${first.reason}`
+            : `${result.failures.length} 份资料都未通过。第一份「${first.file}」：${first.reason}`,
+        );
+      } else {
+        const checks = preflightNotice(result.products);
+        if (checks) setNotice(checks);
+      }
     } catch (e) {
       setNotice((e as Error).message);
     } finally {
@@ -361,31 +373,47 @@ export default function App() {
             <span>GOODS WORKSPACE</span>
           </div>
         </div>
-        <div className="workspace-label">工作空间</div>
-        <nav aria-label="主导航">
-          {(
-            [
-              { id: 'products', Icon: Boxes },
-              { id: 'collection', Icon: Download },
-              { id: 'shops', Icon: Store },
-              { id: 'tasks', Icon: ClipboardList },
-            ] as const
-          ).map(({ id, Icon }) => (
-            <button
-              key={id}
-              className={`nav-item ${page === id ? 'active' : ''}`}
-              aria-current={page === id ? 'page' : undefined}
-              onClick={() => setPage(id)}
-            >
-              <Icon size={19} />
-              <span>{pages[id]}</span>
-              {id === 'products' && data.products.length ? (
-                <span className="nav-count">{data.products.length}</span>
-              ) : null}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-bottom">
+        <div className="sidebar-scroll">
+          <nav aria-label="主导航">
+            {(
+              [
+                {
+                  title: '商品',
+                  items: [
+                    { id: 'products', Icon: Boxes },
+                    { id: 'collection', Icon: Download },
+                  ],
+                },
+                {
+                  title: '店铺与执行',
+                  items: [
+                    { id: 'shops', Icon: Store },
+                    { id: 'tasks', Icon: ClipboardList },
+                  ],
+                },
+              ] as const
+            ).map((group) => (
+              <div className="nav-group" key={group.title}>
+                <div className="nav-group-title">{group.title}</div>
+                {group.items.map(({ id, Icon }) => (
+                  <button
+                    key={id}
+                    className={`nav-item ${page === id ? 'active' : ''}`}
+                    aria-current={page === id ? 'page' : undefined}
+                    onClick={() => setPage(id)}
+                  >
+                    <Icon size={19} />
+                    <span>{pages[id]}</span>
+                    {id === 'products' && data.products.length ? (
+                      <span className="nav-count">{data.products.length}</span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
+        </div>
+        <div className="sidebar-foot">
           <div className="sidebar-local">
             <div className="local-status">
               <span className="dot" aria-hidden="true" />
@@ -393,6 +421,7 @@ export default function App() {
             </div>
             <p>资料保存在这台电脑</p>
           </div>
+          <div className="nav-group-title">设置与帮助</div>
           <div className="sidebar-tools">
             <button
               className={`sidebar-link update-link ${hasNewUpdate || unreadUpdateNotes ? 'update-highlight' : ''}`}
@@ -489,7 +518,7 @@ export default function App() {
                   <p>导入、确认、保存，然后选择你的店铺。</p>
                 </div>
                 <button className="button" onClick={() => setHelp(true)}>
-                  <CircleHelp size={16} />
+                  <Download size={16} />
                   模板下载
                 </button>
               </div>
@@ -510,6 +539,7 @@ export default function App() {
                     </p>
                   </div>
                   <button className="button" onClick={() => setProgressOpen(true)}>
+                    <ClipboardList size={16} />
                     查看执行进度
                   </button>
                 </section>
@@ -554,7 +584,7 @@ export default function App() {
                   <button
                     className="import-option"
                     disabled={busy || !!fatal || loading}
-                    onClick={() => setFolderPending(true)}
+                    onClick={() => importData('folder')}
                   >
                     <span className="file-symbol folder">
                       <FolderOpen size={25} />
@@ -584,6 +614,7 @@ export default function App() {
                 <div className="library-heading">
                   <div>
                     <h2>
+                      <Boxes size={16} />
                       已保存商品 <span className="count-pill">{data.products.length}</span>
                     </h2>
                     <p>核对资料后，勾选商品并选择目标店铺。</p>
@@ -782,7 +813,7 @@ export default function App() {
                   </div>
                 ) : null}
               </section>
-              <div className="batch-bar">
+              <div className={`batch-bar${chosen.length ? ' active' : ''}`}>
                 <div>
                   <strong>已选择 {chosen.length} 件商品</strong>
                   <span>
@@ -796,7 +827,8 @@ export default function App() {
                   disabled={!chosen.length || running}
                   onClick={() => setPicking(true)}
                 >
-                  选择店铺 <ArrowRight size={16} />
+                  <Store size={16} />
+                  选择店铺
                 </button>
               </div>
             </>
@@ -888,6 +920,7 @@ export default function App() {
             setLoginShop(null);
           }}
           onBrowserSetup={showBrowserSetup}
+          onVerified={() => void refresh()}
         />
       ) : null}
       {agentSettings ? <AgentSettings onClose={() => setAgentSettings(false)} /> : null}
@@ -964,25 +997,6 @@ export default function App() {
           onCheck={() => checkBrowser()}
           onClose={() => setBrowserSetup(false)}
         />
-      ) : null}
-      {folderPending ? (
-        <Modal
-          title="待开发"
-          onClose={() => setFolderPending(false)}
-          footer={
-            <button
-              className="button primary"
-              data-autofocus
-              onClick={() => setFolderPending(false)}
-            >
-              知道了
-            </button>
-          }
-        >
-          <div className="modal-body">
-            <p>选择文件夹功能待开发，请先使用“上传 Excel”导入商品资料。</p>
-          </div>
-        </Modal>
       ) : null}
       {updatesOpen ? (
         <AppUpdates

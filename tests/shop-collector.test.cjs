@@ -344,6 +344,7 @@ test('batch produces separate pictured workbooks, preserves source/zero stock/un
       await fs.writeFile(file, await archive.file(name).async('nodebuffer'));
       const [back] = await parseWorkbook(file, dir);
       assert.equal(back.code, '0000123');
+      
       assert.equal(back.skus[0].stock, '0');
       assert.equal(back.source, p.source);
       assert.equal(back.services.invoice, '');

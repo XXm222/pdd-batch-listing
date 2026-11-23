@@ -53,6 +53,9 @@ const api: DesktopApi = {
   supplement: () => call('products:supplement'),
   saveProducts: (products) => call('products:save', products),
   saveShop: (input) => call('shops:save', input),
+  installTemplates: (productId) => call('shops:install-templates', productId),
+  bindInstallTemplate: (productId, template) =>
+    call('shops:bind-template', { productId, template }),
   loginShop: (input) => call('shops:login', input),
   onShopLoginChanged: (listener) => {
     const receive = (_event: Electron.IpcRendererEvent, result: Parameters<typeof listener>[0]) =>

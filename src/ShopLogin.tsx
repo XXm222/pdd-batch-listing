@@ -9,11 +9,14 @@ export function ShopLogin({
   onClose,
   onEdit,
   onBrowserSetup,
+  onVerified,
 }: {
   shop: Shop;
   onClose: () => void;
   onEdit: () => void;
   onBrowserSetup: () => void;
+  /** 核对成功后主进程可能写入后台绑定，界面要重新拉一次店铺列表。 */
+  onVerified?: () => void;
 }) {
   const [result, setResult] = useState<ShopLoginResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,6 +37,7 @@ export function ShopLogin({
     try {
       const next = await window.desktop.loginShop({ id: shop.id, mode });
       setResult(next);
+      if (next.status === 'succeeded') onVerified?.();
       if (next.errorCode === 'browser_unavailable') onBrowserSetup();
     } catch (e) {
       setError((e as Error).message);

@@ -1,4 +1,5 @@
 import type { Asset, ImageTarget, Product, Sku } from './types';
+import { RIM_OPTIONS } from './pdd-rim';
 import { DEFAULT_PLATFORM, platformMeta, type PlatformId } from './platforms';
 export const uid = () => crypto.randomUUID();
 /** 淘宝模板的 templateFormat 标记；导入器与校验都按它分支。 */
@@ -210,6 +211,13 @@ export function problems(p: Product): string[] {
     if (!/^\d+$/.test(s.stock.trim()) || Number(s.stock) > 99999999)
       out.push(`${row} 库存须为非负整数`);
   });
+  // 到店安装：开启后每行规格都必须带轮辋直径，且只能取后台下拉里的固定文案。
+  if (p.install) {
+    if (!p.install.template.trim()) out.push('已开启到店安装，请填写到店安装模板');
+    for (const [i, s] of p.skus.entries())
+      if (!s.rim || !RIM_OPTIONS.includes(s.rim))
+        out.push(`第${i + 1}行规格的轮辋直径须从后台下拉选择，如 17英寸、防爆胎18英寸`);
+  }
   const services = { sevenDay: '按平台规则', invoice: '否', authenticity: '否', ...p.services };
   if (p.category.endsWith('沐浴桶/沐浴盆') && services.sevenDay === '否')
     out.push('当前泡脚桶类目必须支持 7 天无理由退货');
@@ -420,21 +428,37 @@ export function shopNameFromAccount(account: string): string {
   const index = text.search(/[:：]/);
   return index > 0 && text.slice(index + 1).trim() ? text.slice(0, index).trim() : '';
 }
+/**
+ * 决定这条店铺记录最终保存的名称。
+ *
+ * 手填永远优先：后台店铺名称才是权威值，登录账号的前半段只是「主账号名」，
+ * 很多商家两者并不相同（主账号 `邓禄普`，店铺 `邓禄普黑豆专卖店`），
+ * 所以不能让推导结果覆盖用户输入，推导只在用户留空时兜底。
+ */
 export function resolveShopName(
   name: string,
   account: string,
   isNew: boolean,
   platform: PlatformId = DEFAULT_PLATFORM,
+  derived?: string,
 ): string {
   const meta = platformMeta(platform);
-  const resolved =
-    isNew && meta.derivesNameFromAccount ? shopNameFromAccount(account) : name.trim();
-  if (isNew && !resolved)
+  const typed = String(name || '').trim();
+  if (!isNew) {
+    if (!typed) throw new Error('店铺名称须为 1 至 50 个字符');
+    if (typed.length > 50) throw new Error('店铺名称须为 1 至 50 个字符');
+    return typed;
+  }
+  const fallback = meta.derivesNameFromAccount
+    ? String(derived ?? shopNameFromAccount(account)).trim()
+    : '';
+  const resolved = typed || fallback;
+  if (!resolved)
     throw new Error(
       meta.derivesNameFromAccount
-        ? '登录账号请按“店铺名:子账号”填写，支持中英文冒号'
+        ? '请填写与后台一致的店铺名称；登录账号可按“店铺名:子账号”填写'
         : `请填写${meta.label}店铺名称`,
     );
-  if (!resolved || resolved.length > 50) throw new Error('店铺名称须为 1 至 50 个字符');
+  if (resolved.length > 50) throw new Error('店铺名称须为 1 至 50 个字符');
   return resolved;
 }

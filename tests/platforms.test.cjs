@@ -57,10 +57,15 @@ test('平台元数据包含界面文案、HTTPS 入口和能力边界', () => {
   assert.throws(() => requireEnabledPlatform('taobao'), /淘宝暂未开放/);
 });
 
-test('拼多多沿用「店铺名:子账号」推导，淘宝必须手填店铺名称', () => {
+test('店铺名称手填优先，拼多多留空时按「店铺名:子账号」推导，淘宝必须手填', () => {
   assert.equal(shopNameFromAccount(' 日用生活馆:运营账号 '), '日用生活馆');
   assert.equal(resolveShopName('', '日用生活馆:运营账号', true, 'pdd'), '日用生活馆');
-  assert.throws(() => resolveShopName('手填名称', 'demo_operator', true, 'pdd'), /店铺名:子账号/);
+  // 手填永远优先：主账号名与店铺名不同的商家靠这一条才能录对名称。
+  assert.equal(resolveShopName('手填名称', 'demo_operator', true, 'pdd'), '手填名称');
+  assert.equal(resolveShopName('邓禄普黑豆专卖店', '邓禄普:珠珠', true, 'pdd'), '邓禄普黑豆专卖店');
+  // 主账号（手机号 / 数字 ID）推导不出店名，留空即报错要求手填。
+  assert.throws(() => resolveShopName('', 'demo_operator', true, 'pdd'), /请填写与后台一致的店铺名称/);
+  assert.throws(() => resolveShopName('', '13812345678', true, 'pdd'), /请填写与后台一致的店铺名称/);
 
   assert.equal(resolveShopName('  Mandla旗舰店  ', '会员名', true, 'taobao'), 'Mandla旗舰店');
   assert.equal(resolveShopName('Mandla旗舰店', '会员名', false, 'taobao'), 'Mandla旗舰店');
