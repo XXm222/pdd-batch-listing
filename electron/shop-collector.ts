@@ -14,6 +14,7 @@ import {
 } from './platforms/pdd-page-scripts';
 import { exportProductWorkbook } from './workbook-export';
 import { saveImage } from './importer';
+import { ExecutionError } from './execution';
 import { newProduct } from '../src/domain';
 import { auditImages } from '../src/product-checks';
 import { normalizePlatform } from '../src/platforms';
@@ -21,7 +22,7 @@ import type { CollectionState, Product, Shop, ShopGoods } from '../src/types';
 
 const ORIGIN = 'https://mms.pinduoduo.com';
 const LIST = `${ORIGIN}/goods/goods_list?msfrom=mms_sidenav`;
-const saleLabel = /^(?:在售(?:中|商品)?|出售中)(?:[(（]?\d+\+?[)）]?)?$/;
+const saleLabel = /^(?:在售(?:中|商品)?|出售中)(?:[(（]?\d+(?:[,，]\d{3})*\+?[)）]?)?$/;
 const safeName = (s: string) => s.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').slice(0, 70);
 export function imageUrl(value: string): string {
   const u = new URL(value);
@@ -38,7 +39,7 @@ export function imageUrl(value: string): string {
 
 // Serialized into the user's browser. Only inspect the list; do not change goods.
 export function saleListEntry() {
-  const sale = /^(?:在售(?:中|商品)?|出售中)(?:[(（]?\d+\+?[)）]?)?$/;
+  const sale = /^(?:在售(?:中|商品)?|出售中)(?:[(（]?\d+(?:[,，]\d{3})*\+?[)）]?)?$/;
   const entries = [
     ...document.querySelectorAll<HTMLElement>(
       '[data-testid="beast-core-tab-itemLabel"],[role="tab"]',
@@ -54,23 +55,26 @@ export function saleListEntry() {
 export function readSalePage() {
   const visible = (e: Element) => !!e.getClientRects().length;
   const text = (e: Element | null) => ((e as HTMLElement)?.innerText || '').trim();
-  const sale = /^(?:在售(?:中|商品)?|出售中)(?:[(（]?\d+\+?[)）]?)?$/;
-  const selected = [
+  const sale = /^(?:在售(?:中|商品)?|出售中)(?:[(（]?\d+(?:[,，]\d{3})*\+?[)）]?)?$/;
+  const selectedLabels = [
     ...document.querySelectorAll(
-      '[aria-selected="true"],[data-state="active"],[class*="active"],[class*="selected"]',
+      '[aria-selected="true"],[data-state="active"],[data-selected="true"],[class*="active"],[class*="selected"]',
     ),
   ]
     .filter(visible)
-    .some((e) => sale.test(text(e).replace(/\s/g, '')));
+    .map((e) => text(e).replace(/\s/g, ''))
+    .filter((label) => sale.test(label));
   const tables = [...document.querySelectorAll<HTMLTableElement>('table')].filter(
     (e) => visible(e) && /商品/.test(text(e.tHead)) && /价格|库存|操作/.test(text(e.tHead)),
   );
-  if (tables.length !== 1) return { ready: false, reason: '未找到唯一的商品列表' };
+  if (tables.length !== 1) return { ready: false as const, reason: '未找到唯一的商品列表' };
   const table = tables[0],
     headers = [...(table.tHead?.rows || [])].at(-1)?.cells;
   const labels = [...(headers || [])].map((e) => text(e).replace(/\s/g, ''));
   // The current PDD table puts its sticky header and body in separate tables.
   const container = table.closest('[data-testid="beast-core-table"]') || table;
+  if (container.closest('[aria-busy="true"]') || container.querySelector('[aria-busy="true"]'))
+    return { ready: false as const, reason: '商品表格正在加载' };
   const bodies =
     container === table
       ? [table]
@@ -78,7 +82,7 @@ export function readSalePage() {
   const goods = bodies
     .flatMap((t) => [...t.tBodies])
     .flatMap((b) => [...b.rows])
-    .filter((r) => r.cells.length > 1)
+    .filter((r) => visible(r) && r.cells.length > 1)
     .map((r) => {
       const cells = [...r.cells];
       const column = (pattern: RegExp) => cells[labels.findIndex((h) => pattern.test(h))];
@@ -119,42 +123,69 @@ export function readSalePage() {
       };
     });
   const active =
-    selected || (goods.length > 0 && goods.every((g) => /在售|出售中|销售中/.test(g.rowText)));
-  const nexts = [
+    selectedLabels.length > 0 ||
+    (goods.length > 0 &&
+      goods.every((g) =>
+        g.rowText.split('\n').some((line) => /^(在售|在售中|出售中|销售中)$/.test(line.trim())),
+      ));
+  const pagination = [
     ...document.querySelectorAll<HTMLElement>(
+      '[data-testid="beast-core-pagination"],nav[aria-label="分页"],nav[aria-label="Pagination" i]',
+    ),
+  ].filter(visible);
+  const pagers = pagination.filter(
+    (e) => !pagination.some((other) => other !== e && e.contains(other)),
+  );
+  const pager = pagers.length === 1 ? pagers[0] : undefined;
+  const controls = [
+    ...(pager || document).querySelectorAll<HTMLElement>(
       'button,[role=button],a,[data-testid="beast-core-pagination-next"]',
     ),
   ].filter(
     (e) =>
       visible(e) &&
       (e.getAttribute('data-testid') === 'beast-core-pagination-next' ||
-        /下一页/.test(e.getAttribute('aria-label') || '') ||
-        /^下一页$/.test(text(e)) ||
-        /pagination.*next|next.*pagination/i.test(e.className)),
+        /^(?:下一页|Next(?: page)?)$/i.test(
+          e.getAttribute('aria-label') || e.getAttribute('title') || text(e),
+        ) ||
+        /pagination.*next|next.*pagination/i.test(String(e.className))),
   );
-  const next = nexts.length === 1 ? nexts[0] : null;
+  const nexts = [
+    ...new Set(controls.map((e) => e.closest<HTMLElement>('button,[role=button],a') || e)),
+  ];
+  // A test ID can sit on a wrapper around the actual labelled button, or on its icon.
+  const targets = nexts.filter((e) => !nexts.some((other) => other !== e && e.contains(other)));
+  const next = targets.length === 1 ? targets[0] : null;
+  const disabled = (e: HTMLElement) =>
+    !!e.closest('[disabled],[aria-disabled="true"],[data-disabled="true"],[class*="disabled"]');
   const hasNext =
-    !!next &&
-    !(next as HTMLButtonElement).disabled &&
-    next.getAttribute('aria-disabled') !== 'true' &&
-    !/disabled/.test(next.className);
+    !!next && !disabled(next) && !controls.some((e) => next.contains(e) && disabled(e));
   for (const old of document.querySelectorAll('[data-goods-sale-next]'))
     old.removeAttribute('data-goods-sale-next');
-  if (next) next.setAttribute('data-goods-sale-next', 'true');
-  const pagination = [
-    ...document.querySelectorAll<HTMLElement>('[data-testid="beast-core-pagination"]'),
-  ].filter(visible);
-  const total =
-    pagination.length === 1 ? text(pagination[0]).match(/共有\s*(\d+)\s*条/)?.[1] : undefined;
-  const empty = /共有\s*0\s*条|暂无(?:商品|数据)/.test(text(container)) || total === '0';
+  if (hasNext) next.setAttribute('data-goods-sale-next', 'true');
+  const count = (value: string | undefined) => {
+    if (value === undefined) return undefined;
+    const parsed = Number(value.replace(/[,，]/g, ''));
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
+  };
+  const totalLabel = /共(?:有|计)?\s*(\d+(?:[,，]\d{3})*)\s*(?:条|件)/;
+  const pagerTotal = count(text(pager || null).match(totalLabel)?.[1]);
+  const tabCounts = [
+    ...new Set(
+      selectedLabels.map((label) => count(label.match(/[(（]?(\d+(?:[,，]\d{3})*)[)）]?$/)?.[1])),
+    ),
+  ];
+  const total = pagerTotal ?? (tabCounts.length === 1 ? tabCounts[0] : undefined);
+  const empty =
+    goods.length === 0 &&
+    (total === 0 || /^暂无(?:在售)?(?:商品|数据)[。！!]?$/m.test(text(container)));
   return {
-    ready: true,
+    ready: true as const,
     active,
     goods,
     hasNext,
-    total: total === undefined ? undefined : Number(total),
-    paginationKnown:
-      nexts.length === 1 || /共有\s*0\s*条|暂无(?:商品|数据)/.test(document.body.innerText),
+    total,
+    paginationKnown: !!next || (targets.length === 0 && (empty || total === goods.length)),
     empty,
   };
 }
@@ -206,6 +237,12 @@ export function parseSalePage(raw: unknown): { goods: ShopGoods[]; hasNext: bool
   if (!goods.length && raw.empty !== true) throw Error('商品列表为空，后台尚未明确显示无商品');
   return { goods, hasNext: raw.hasNext === true };
 }
+
+const salePageSignature = (goods: { goodsId?: string }[]) =>
+  goods
+    .map((g) => g.goodsId)
+    .sort()
+    .join(',');
 
 export function readProductFacts() {
   const value = (selector: string) =>
@@ -518,18 +555,31 @@ export class ShopCollector {
     this.guard();
     await this.bridge.call('click', { selector: ref });
   }
-  private async salePage() {
-    return this.bridge.wait(
-      async () => {
+  private async salePage(previous?: string) {
+    let reason = '未读取到商品表格';
+    try {
+      return await this.bridge.wait(async () => {
         this.guard();
-        const raw = await this.bridge.eval<any>(`(${readSalePage.toString()})()`, 6000);
-        return raw?.ready && raw?.active && raw?.paginationKnown && (raw.goods?.length || raw.empty)
-          ? raw
-          : false;
-      },
-      15000,
-      '在售商品列表或分页尚未加载完整，请核对浏览器页面',
-    );
+        const raw = await this.bridge.eval<ReturnType<typeof readSalePage>>(
+          `(${readSalePage.toString()})()`,
+          6000,
+        );
+        if (!raw?.ready) reason = raw?.reason || '未读取到商品表格';
+        else if (!raw.active) reason = '未确认当前是“在售”列表';
+        else if (!raw.goods.length && !raw.empty) reason = '未读取到商品，后台也未显示列表为空';
+        else if (!raw.paginationKnown) reason = '未识别分页，也无法通过后台总数确认本页完整';
+        else if (previous !== undefined && salePageSignature(raw.goods) === previous)
+          reason = '翻页后仍显示上一页商品';
+        else return raw;
+        return false;
+      }, 15000);
+    } catch (error) {
+      if (!(error instanceof ExecutionError) || error.code !== 'page_timeout') throw error;
+      throw new ExecutionError(
+        'page_timeout',
+        `读取在售商品超时：${reason}。请核对浏览器中的在售列表`,
+      );
+    }
   }
   async list(shop: Shop) {
     if (normalizePlatform(shop.platform) !== 'pdd') throw Error('当前仅支持采集拼多多店铺');
@@ -551,21 +601,27 @@ export class ShopCollector {
       await this.bridge.navigate(LIST);
       await this.selectSaleList();
       const all = new Map<string, ShopGoods>();
+      let previous: string | undefined;
+      let total: number | undefined;
       for (let page = 1; page <= 250; page++) {
         this.guard();
-        const raw = await this.salePage();
-        const current = parseSalePage(raw),
-          before = all.size;
+        const raw = await this.salePage(previous);
+        const current = parseSalePage(raw);
+        if (raw.total !== undefined) {
+          if (total !== undefined && raw.total !== total)
+            throw Error('翻页过程中在售商品总数发生变化，请重新读取');
+          total = raw.total;
+        }
+        if (current.goods.some((g) => all.has(g.goodsId)))
+          throw Error('不同页读到了相同的商品编号，已保留读取结果，请重新读取');
         for (const g of current.goods) all.set(g.goodsId, g);
-        if (page > 1 && all.size === before)
-          throw Error('翻页后商品列表未变化，已保留读取结果，请重新读取');
         this.update({
           goods: [...all.values()],
           message: `正在读取第 ${page} 页，已读取 ${all.size} 件在售商品`,
         });
         if (!current.hasNext) {
-          if (Number.isSafeInteger(raw.total) && all.size !== raw.total)
-            throw Error(`已读取 ${all.size} 件商品，与后台总数 ${raw.total} 不一致，请重新读取`);
+          if (total !== undefined && all.size !== total)
+            throw Error(`已读取 ${all.size} 件商品，与后台总数 ${total} 不一致，请重新读取`);
           this.update({
             completeList: true,
             status: 'ready',
@@ -575,19 +631,10 @@ export class ShopCollector {
         }
         if (all.size > 5000 || page === 250)
           throw Error('商品数量超过第一版读取范围，请分店铺或缩小后台筛选范围');
+        if (total !== undefined && all.size >= total)
+          throw Error('已读取数量与后台分页状态不一致，请重新读取');
+        previous = salePageSignature(current.goods);
         await this.nextPage();
-        const signature = current.goods.map((g) => g.goodsId).join(',');
-        await this.bridge.wait(
-          async () => {
-            this.guard();
-            const r = await this.bridge.eval<any>(`(${readSalePage.toString()})()`, 6000);
-            return r?.ready && r.goods?.map((g: any) => g.goodsId).join(',') !== signature
-              ? true
-              : false;
-          },
-          15000,
-          '后台翻页未完成',
-        );
       }
     } catch (e) {
       this.update({
@@ -624,8 +671,9 @@ export class ShopCollector {
     await this.bridge.navigate(LIST);
     await this.selectSaleList();
     // Prefer the actual link captured from the list, never construct a guessed editor URL.
+    let previous: string | undefined;
     for (let page = 0; page < 250; page++) {
-      const current = parseSalePage(await this.salePage());
+      const current = parseSalePage(await this.salePage(previous));
       const snapshot = await this.bridge.snapshot();
       const rows = flatten(snapshot.tree).filter(
         (n) =>
@@ -675,17 +723,8 @@ export class ShopCollector {
         return;
       }
       if (!current.hasNext) break;
+      previous = salePageSignature(current.goods);
       await this.nextPage();
-      const signature = current.goods.map((g) => g.goodsId).join(',');
-      await this.bridge.wait(
-        async () => {
-          this.guard();
-          const r = await this.bridge.eval<any>(`(${readSalePage.toString()})()`, 6000);
-          return r?.ready && r.goods?.map((g: any) => g.goodsId).join(',') !== signature;
-        },
-        15000,
-        '查找商品翻页未完成',
-      );
     }
     throw Error('来源商品已不在当前在售列表，请刷新列表后重新选择');
   }

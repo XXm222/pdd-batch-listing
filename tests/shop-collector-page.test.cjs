@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
+const { ExecutionError } = require('../dist-electron/electron/execution');
 const {
   saleListEntry,
   readSalePage,
@@ -8,7 +9,17 @@ const {
   ShopCollector,
 } = require('../dist-electron/electron/shop-collector');
 
-function page({ label = '在售中(99+)', hidden = false, disabled = false } = {}) {
+function page({
+  label = '在售中(99+)',
+  hidden = false,
+  disabled = false,
+  noNext = false,
+  noPager = false,
+  nestedNext = false,
+  iconDisabled = false,
+  totalLabel = '共有 1 条',
+  busy = false,
+} = {}) {
   const element = (innerText, extra = {}) => ({
     innerText,
     className: '',
@@ -24,6 +35,12 @@ function page({ label = '在售中(99+)', hidden = false, disabled = false } = {
     },
     querySelectorAll() {
       return [];
+    },
+    closest() {
+      return null;
+    },
+    contains() {
+      return false;
     },
     ...extra,
   });
@@ -43,22 +60,40 @@ function page({ label = '在售中(99+)', hidden = false, disabled = false } = {
   });
   const headerTable = element('', { tHead: head, tBodies: [] });
   const bodyTable = element('', { tBodies: [{ rows: [row] }] });
-  const container = element('', { querySelectorAll: () => [headerTable, bodyTable] });
+  const container = element('', {
+    querySelectorAll: () => [headerTable, bodyTable],
+    closest: () => (busy ? container : null),
+  });
   headerTable.closest = () => container;
   const next = element('', {
     className: disabled ? 'PGT_next PGT_disabled' : 'PGT_next',
     getAttribute(name) {
+      if (nestedNext) return name === 'aria-label' ? '下一页' : null;
       return name === 'data-testid' ? 'beast-core-pagination-next' : null;
     },
+    closest(selector) {
+      return disabled && selector.includes('aria-disabled') ? this : null;
+    },
+    contains: (child) => nestedNext && child === icon,
   });
+  const icon = element('', {
+    getAttribute: (name) => (name === 'data-testid' ? 'beast-core-pagination-next' : null),
+    closest(selector) {
+      if (selector.startsWith('button')) return next;
+      return disabled || iconDisabled ? this : null;
+    },
+  });
+  const controls = noNext ? [] : nestedNext ? [next, icon] : [next];
+  const pager = element(totalLabel, { querySelectorAll: () => controls });
   const document = {
     body: { innerText: '' },
     querySelectorAll(selector) {
       if (selector.includes('tab-itemLabel')) return [tab];
       if (selector === 'table') return [headerTable, bodyTable];
       if (selector.includes('aria-selected')) return [tab];
-      if (selector === '[data-testid="beast-core-pagination"]') return [element('共有 1 条')];
-      if (selector.includes('pagination-next')) return [next];
+      if (selector.startsWith('[data-testid="beast-core-pagination"]'))
+        return noPager ? [] : [pager];
+      if (selector.includes('pagination-next')) return controls;
       return [];
     },
   };
@@ -87,6 +122,32 @@ test('分离的表头和商品行、ID:编号及标题控件能读取，图标�
 
 test('末页禁用的图标不会被当作下一页', () => {
   assert.equal(page({ disabled: true }).run(readSalePage).hasNext, false);
+});
+
+test('下一页按钮和嵌套图标只定位一次，并遵守外层按钮禁用状态', () => {
+  const p = page({ nestedNext: true });
+  assert.equal(p.run(readSalePage).hasNext, true);
+  assert.equal(p.next['data-goods-sale-next'], 'true');
+  const last = page({ nestedNext: true, disabled: true });
+  assert.equal(last.run(readSalePage).paginationKnown, true);
+  assert.equal(last.next['data-goods-sale-next'], undefined);
+  assert.equal(page({ nestedNext: true, iconDisabled: true }).run(readSalePage).hasNext, false);
+});
+
+test('单页可以用准确的在售总数确认，只有 99+ 或行数不符时仍等待', () => {
+  const samples = [
+    [{ noNext: true, totalLabel: '共 1 件' }, true, 1],
+    [{ noNext: true, noPager: true, label: '在售商品（1）' }, true, 1],
+    [{ noNext: true, noPager: true, label: '在售商品（1,234）' }, false, 1234],
+    [{ noNext: true, noPager: true }, false, undefined],
+  ];
+  for (const [options, ready, total] of samples) {
+    const raw = page(options).run(readSalePage);
+    assert.equal(raw.paginationKnown, ready);
+    assert.equal(raw.total, total);
+    assert.equal(raw.hasNext, false);
+  }
+  assert.equal(page({ busy: true }).run(readSalePage).ready, false);
 });
 
 test('编辑新标签页必须匹配来源和商品编号，普通 ID: 行能找到编辑入口', async () => {
@@ -182,4 +243,52 @@ test('表格和分页未就绪时等待；末页总数不一致不能报告完�
   assert.equal(result.status, 'error');
   assert.equal(result.completeList, false);
   assert.match(result.message, /与后台总数 2 不一致/);
+});
+
+test('翻页须等到商品变化，跨页重复时保留已读结果并拒绝标记完成', async () => {
+  const c = new ShopCollector(
+    '',
+    '',
+    async () => '',
+    () => {},
+    () => true,
+  );
+  c.login = async () => {};
+  let reads = 0;
+  let clicks = 0;
+  c.bridge = {
+    navigate: async () => {},
+    call: async () => {
+      clicks++;
+    },
+    eval: async (code) => {
+      if (code.includes('saleListEntry')) return { count: 1, selector: '@sale' };
+      if (!code.includes('readSalePage')) return 1;
+      const goods = ++reads <= 2 ? ['101', '102'] : ['102', '103'];
+      return {
+        ready: true,
+        active: true,
+        paginationKnown: true,
+        hasNext: reads <= 2,
+        total: 4,
+        goods: goods.map((goodsId) => ({ goodsId, title: '标题' })),
+      };
+    },
+    wait: async (check) => {
+      for (let i = 0; i < 3; i++) {
+        const result = await check();
+        if (result) return result;
+      }
+      throw new ExecutionError('page_timeout', '超时');
+    },
+  };
+  const result = await c.list({ id: 'shop', name: '样例店铺' });
+  assert.equal(clicks, 2);
+  assert.equal(reads, 3);
+  assert.deepEqual(
+    result.goods.map((g) => g.goodsId),
+    ['101', '102'],
+  );
+  assert.equal(result.completeList, false);
+  assert.match(result.message, /不同页读到了相同的商品编号/);
 });
