@@ -96,7 +96,7 @@ function fixture(overrides = {}, afterSubmit = {}) {
     },
     (event) => events.push(event),
   );
-  return { state, calls, events, waits, login, decrypts: () => decrypts };
+  return { state, calls, events, waits, bridge, login, decrypts: () => decrypts };
 }
 
 test('QR login page automatically switches to account login and submits the saved credentials once', async () => {
@@ -154,7 +154,7 @@ test('ordinary-account confirmation accurately describes a shop-name check', asy
   assert.ok(!shopIdentityMessage(ordinary).includes('已核对后台店铺及登录账号'));
 });
 
-function readState(headerText, bannerText, pathname = '/home/', hiddenLogout = false) {
+function readState(headerText, bannerText, pathname = '/home/', hiddenLogout = false, cachedUser) {
   const root = (text) => {
     const leaves = text
       .split('\n')
@@ -185,6 +185,7 @@ function readState(headerText, bannerText, pathname = '/home/', hiddenLogout = f
         document,
         location: { origin: 'https://mms.pinduoduo.com', pathname },
         getComputedStyle: () => ({ visibility: 'visible' }),
+        localStorage: { getItem: () => JSON.stringify(cachedUser ?? null) },
       }),
     ),
   );
@@ -483,20 +484,95 @@ test('a clear different subaccount can switch even when the shop uses backend-ca
   assert.equal(f.decrypts(), 1);
 });
 
-test('relogin reports an unavailable logout control instead of guessing another UI action', async () => {
-  const state = readState(`${shop.name}\n${shop.account}`, null);
+test('automatic reuse with a missing logout control asks for explicit relogin without clearing cookies', async () => {
+  const state = readState('其他店铺\n其他店铺:运营\n退出当前账号', null);
   const actions = [];
   const login = new PddLogin(
     {
       eval: async (code) =>
         code === LOGIN_STATE ? state : (actions.push('logout-attempt'), false),
+      call: async () => assert.fail('only explicit relogin may clear cookies'),
       fill: async () => assert.fail('must not fill before logout'),
       wait: async (check) => check(),
     },
     async () => 'isolated-password',
   );
-  await assert.rejects(login.run(shop, 'relogin'), /未能唯一找到退出账号入口/);
+  await assert.rejects(login.run(shop), /退出并重新登录/);
   assert.deepEqual(actions, ['logout-attempt']);
+});
+
+test('explicit relogin clears only merchant cookies when the normal exit is unavailable', async () => {
+  const f = fixture(readState(`${shop.name}\n${shop.account}`, null));
+  const originalEval = f.bridge.eval;
+  f.bridge.eval = async (code) =>
+    code.includes("querySelectorAll('header *,[role=banner] *')") ? false : originalEval(code);
+  f.bridge.call = async (action, args, timeout) => {
+    f.calls.push([action, args, timeout]);
+    if (action === 'navigate')
+      Object.assign(f.state, { signedIn: false, names: [], loginPage: true, form: false });
+  };
+  await f.login.run(shop, 'relogin');
+  assert.deepEqual(f.calls, [
+    [
+      'cdp',
+      {
+        method: 'Storage.clearDataForOrigin',
+        params: { origin: 'https://mms.pinduoduo.com', storageTypes: 'cookies' },
+      },
+      5000,
+    ],
+    [
+      'navigate',
+      {
+        url: 'https://mms.pinduoduo.com/home/',
+        newTab: true,
+        group_title: '商品运营台',
+      },
+      undefined,
+    ],
+    'account-tab',
+    ['#usernameId', shop.account],
+    ['#passwordId', 'isolated-password'],
+    'submit-login',
+  ]);
+});
+
+test('if clearing cookies fails or the merchant session stays logged in, no credentials are submitted', async () => {
+  for (const unsupported of [true, false]) {
+    const state = readState(`${shop.name}\n${shop.account}\n退出当前账号`, null);
+    const actions = [];
+    const login = new PddLogin(
+      {
+        eval: async (code) => {
+          if (code === LOGIN_STATE) return state;
+          if (code.includes("querySelectorAll('header *,[role=banner] *')")) return false;
+          assert.fail('must not use the login form before logged out');
+        },
+        call: async (action) => {
+          actions.push(action);
+          if (unsupported && action === 'cdp') throw Error('method unsupported');
+        },
+        fill: async () => assert.fail('must not submit credentials'),
+        wait: async (check, _timeout, message) => {
+          const result = await check();
+          if (result) return result;
+          throw new ExecutionError('page_timeout', message);
+        },
+      },
+      async () => 'isolated-password',
+    );
+    await assert.rejects(login.run(shop, 'relogin'), /请在浏览器手动退出/);
+    assert.deepEqual(actions, unsupported ? ['cdp'] : ['cdp', 'navigate']);
+  }
+});
+
+test('a returned login page does not use the previous account cached in local storage', () => {
+  const current = { id: 12, mall_id: 34 };
+  assert.equal(readState('', null, '/login/', false, current).anchor, undefined);
+  assert.deepEqual(readState('', null, '/home/', false, current).anchor, {
+    userId: 12,
+    mallId: 34,
+  });
 });
 
 test('explicit relogin retains the user-requested logout and login behavior', async () => {

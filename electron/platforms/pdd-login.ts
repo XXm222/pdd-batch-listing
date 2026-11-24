@@ -16,7 +16,7 @@ import type { Shop, ShopLoginEvent } from '../../src/types';
 export { ShopLoginError } from './shop-login';
 
 const ORIGIN = 'https://mms.pinduoduo.com';
-type Bridge = Pick<BrowserBridge, 'eval' | 'fill' | 'wait'>;
+type Bridge = Pick<BrowserBridge, 'call' | 'eval' | 'fill' | 'wait'>;
 type LoginStructure = {
   headerPresent: boolean;
   bannerPresent: boolean;
@@ -52,7 +52,7 @@ export const LOGIN_STATE = `(() => {
   const loginPage=/^\\/login(?:\\/|$)/.test(location.pathname),form=visible(document.querySelector('#usernameId'))&&visible(document.querySelector('#passwordId'));
   const rejected=/账号或密码错误|账户或密码错误|用户名或密码错误|密码不正确|密码错误|账号不存在|账户不存在|账号已被锁定|账号被锁定/.test(text);
   const challenge=/请拖动滑块|拖动滑块完成|滑动完成验证|点击完成验证|请完成安全验证|请完成验证|请输入短信验证码/.test(text)||[...document.querySelectorAll('iframe')].some(e=>visible(e)&&/captcha|verify|验证码|安全验证/i.test(e.title+' '+e.src));
-  return {trusted:true,anchor,names,signedIn:(logoutDomPresent||logoutTextPresent)&&!loginPage&&!form&&!rejected&&!challenge,
+  return {trusted:true,anchor:loginPage||form?undefined:anchor,names,signedIn:(logoutDomPresent||logoutTextPresent)&&!loginPage&&!form&&!rejected&&!challenge,
     structure:{headerPresent:!!header,bannerPresent:!!banner,logoutTextPresent,logoutDomPresent,logoutVisible,maskedTextPresent:names.some(s=>s.includes('*')),nameCount:names.length},
     loginPage,form,rejected,challenge};
 })()`;
@@ -157,6 +157,57 @@ export class PddLogin {
   private async trusted() {
     if (!(await this.state()).trusted)
       throw new ShopLoginError('failed', '登录页面地址不正确，已停止填写');
+  }
+  private async resetLoginCookies(shop: Shop) {
+    const state = await this.state();
+    if (state.trusted && state.challenge)
+      throw new ShopLoginError('verification_required', '请在浏览器完成当前登录验证后再核对');
+    if (state.trusted && !state.signedIn && state.loginPage && !state.rejected) return;
+    if (
+      !state.trusted ||
+      state.form ||
+      state.rejected ||
+      !(isPddLoginConfirmed(state, shop) || pddAnchorVerdict(state.anchor, shop) === 'mismatch')
+    )
+      throw new ShopLoginError('failed', '当前后台登录状态已变化，请先在浏览器核对');
+    this.guard();
+    try {
+      // Clear only cookies owned by the merchant host, including HttpOnly.
+      await this.bridge.call(
+        'cdp',
+        {
+          method: 'Storage.clearDataForOrigin',
+          params: { origin: ORIGIN, storageTypes: 'cookies' },
+        },
+        5000,
+      );
+    } catch (error) {
+      if (error instanceof ExecutionError) throw error;
+      throw new ShopLoginError('failed', '浏览器未确认已清理商家后台 Cookie，请在浏览器手动退出');
+    }
+    this.guard();
+    // Check the site's response in a new tab so the current tab isn't reloaded.
+    await this.bridge.call('navigate', {
+      url: ORIGIN + '/home/',
+      newTab: true,
+      group_title: '商品运营台',
+    });
+    try {
+      await this.bridge.wait(
+        async () => {
+          const current = await this.state();
+          if (current.trusted && current.challenge)
+            throw new ShopLoginError('verification_required', '请在浏览器完成当前登录验证后再核对');
+          return current.trusted && current.loginPage && !current.signedIn && !current.rejected;
+        },
+        15000,
+        '清理商家后台 Cookie 后未确认退出，请在浏览器手动退出当前账号',
+      );
+    } catch (error) {
+      if (error instanceof ExecutionError && error.code === 'page_timeout')
+        throw new ShopLoginError('failed', error.message, this.lastState?.structure);
+      throw error;
+    }
   }
   private async poll(check: (s: LoginState) => boolean, message: string, timeout = 15000) {
     try {
@@ -287,8 +338,16 @@ export class PddLogin {
         })()`,
             5000,
           );
-          if (!clicked)
-            throw new ShopLoginError('failed', '未能唯一找到退出账号入口，请在已连接的浏览器核对');
+          if (!clicked) {
+            if (mode === 'relogin') {
+              await this.resetLoginCookies(shop);
+              return;
+            }
+            throw new ShopLoginError(
+              'failed',
+              '未能唯一找到退出账号入口，请在店铺管理点击“退出并重新登录”',
+            );
+          }
           let confirmed = false;
           try {
             await this.bridge.wait(

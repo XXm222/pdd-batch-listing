@@ -42,7 +42,7 @@ export const PLATFORMS: Record<PlatformId, PlatformDefinition> = {
     allowsSubAccount: true,
     namePlaceholder: '填写商家后台右上角头像下方的店铺名称',
     loginHint:
-      '在已连接浏览器退出当前拼多多账号，自动填写此店铺保存的账号密码并点击登录。登录后核对店铺名称与子账号。',
+      '退出当前账号后，用此店铺保存的账号密码登录。若找不到退出入口，会清理此浏览器的拼多多商家后台 Cookie，同一浏览器的其他商家后台标签页也可能退出。',
     draftPublishing: true,
     draftPendingMessage: '',
   },
