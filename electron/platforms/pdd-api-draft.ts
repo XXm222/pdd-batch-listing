@@ -873,7 +873,11 @@ export class PddApiDraft {
           '类目模板',
         );
         if (Object.keys(record(template.spec_module, '类目规格模板')).length)
-          changed('当前API流程暂不支持绑定类目属性的规格模板');
+          throw new ExecutionError(
+            'unsupported_category_spec',
+            `该类目的规格与类目属性关联，当前版本暂不能自动保存。已保留原商品编号 ${t.goodsId}，规格尚未填写。请保留商品资料，待适配此类目后继续原任务。`,
+            'inspect_form',
+          );
         const properties = apiProperties(p, template);
         return { template, properties };
       },

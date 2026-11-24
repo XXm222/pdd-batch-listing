@@ -176,6 +176,7 @@ export type TaskErrorCode =
   | 'form_changed'
   | 'form_lost'
   | 'upload_uncertain'
+  | 'unsupported_category_spec'
   | 'save_uncertain'
   | 'paused'
   | 'platform_changed';

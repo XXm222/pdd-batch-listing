@@ -126,6 +126,29 @@ async function withReplies(replies, work) {
 }
 const reply = (content) => ({ message: { role: 'assistant', content }, tokens: 10 });
 
+test('类目关联规格未适配只走本机诊断，不调用模型、读页面或自动继续', async () => {
+  for (const [code, message] of [
+    ['unsupported_category_spec', '该类目的规格与类目属性关联'],
+    ['platform_changed', '当前API流程暂不支持绑定类目属性的规格模板'],
+  ]) {
+    const f = fixture({
+      executionMode: 'pdd_api',
+      error: { code, message, recovery: 'inspect_form' },
+    });
+    await withReplies([], async (requests) => {
+      assert.deepEqual(allowedActions(f.task, true), ['manual']);
+      await f.agent.handleFailure('t', () => assert.fail('不应自动继续'));
+      assert.equal(f.task.agentDiagnosis, undefined);
+      await f.agent.diagnose('t', true);
+      assert.equal(f.task.agentDiagnosis.model, '本机流程检查');
+      assert.equal(f.task.agentDiagnosis.proposals[0].action, 'manual');
+      assert.equal(f.inspections, 0);
+      assert.equal(f.repairs, 0);
+      assert.equal(requests.length, 0);
+    });
+  }
+});
+
 test('diagnosis accepts a unique JSON object wrapped in prose or a Markdown fence', () => {
   const task = fixture().task;
   for (const content of [

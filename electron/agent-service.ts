@@ -70,9 +70,16 @@ export type RecoveryResult = {
 // An unsaved PDD add-page URL does not persist its fields, even with the same
 // goods_id. Reopening it is not a recovery tool; keep the legacy type for refusal.
 const recoveryNames: PageRecovery[] = ['dismiss_notice', 'wait_form_ready', 'wait_uploads'];
+const unsupportedCategorySpec = (t: Task) =>
+  t.error?.code === 'unsupported_category_spec' ||
+  (t.executionMode === 'pdd_api' &&
+    t.error?.code === 'platform_changed' &&
+    t.error.message === '当前API流程暂不支持绑定类目属性的规格模板');
+
 export function isPageFailure(t: Task) {
   return (
     !!t.error &&
+    !unsupportedCategorySpec(t) &&
     [
       'page_timeout',
       'form_changed',
@@ -118,6 +125,7 @@ export function allowedActions(t: Task, automatic = false): AgentAction[] {
     return [];
   if (t.saveAttemptedAt)
     return t.error.recovery === 'confirm_shop' ? ['manual'] : ['readback', 'manual'];
+  if (unsupportedCategorySpec(t)) return ['manual'];
   if (needsManualLogin(t)) return ['manual'];
   if (isLoginDiagnosis(t))
     return [
@@ -213,9 +221,20 @@ export function parseDiagnosis(
     }),
   };
 }
-function localConnectionDiagnosis(
-  t: Task,
-): { summary: string; proposals: AgentProposal[] } | undefined {
+function localDiagnosis(t: Task): { summary: string; proposals: AgentProposal[] } | undefined {
+  if (unsupportedCategorySpec(t) && !t.saveAttemptedAt)
+    return {
+      summary:
+        '后台要求将商品规格与类目属性关联。当前版本还没有适配此规则，任务未进入规格填写或草稿保存。',
+      proposals: [
+        {
+          action: 'manual',
+          reason:
+            '保留原任务和商品资料。记录完整类目路径及后台显示的规格与属性名称，供适配后核对原任务。',
+          evidence: ['类目模板返回了与属性关联的规格规则。'],
+        },
+      ],
+    };
   if (needsManualLogin(t))
     return {
       summary:
@@ -624,7 +643,7 @@ export class AgentService {
     const start = performance.now();
     let d: AgentDiagnosis | undefined;
     try {
-      const local = localConnectionDiagnosis(t);
+      const local = localDiagnosis(t);
       if (local) {
         d = {
           id: randomUUID(),

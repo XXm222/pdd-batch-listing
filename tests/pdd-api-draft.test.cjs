@@ -134,6 +134,51 @@ test('API规格按名称值匹配，保留编码前导零和真实零库存', ()
   actual[1].out_sku_sn = '1';
   assert.equal(apiSkuMatches(p, actual, {}), false);
 });
+test('检测到关联类目属性的规格时保留原编号，重试不重新创建或保存', async () => {
+  const task = { productSnapshot: product() };
+  const routes = [];
+  const bridge = {
+    async eval(code) {
+      const route = code.match(/"route":"([^"]+)"/)[1];
+      routes.push(route);
+      if (route.endsWith('/search/categories/v2'))
+        return {
+          ok: true,
+          value: {
+            cat_info_v2_lists: [{ optional: true, cat_id_1: 2, cat_name_1: '末级类目' }],
+          },
+        };
+      if (route.endsWith('/commit/create_new'))
+        return { ok: true, value: { goods_id: 123, goods_commit_id: 456 } };
+      if (route.endsWith('/commit/detail'))
+        return { ok: true, value: { goods_id: 123, id: 456, sku: [] } };
+      assert.equal(route, '/draco-ms/mms/template/mall');
+      return { ok: true, value: { spec_module: { fixture: true } } };
+    },
+  };
+  const adapter = new PddApiDraft(bridge, '/unused', async () => {});
+  const shop = { name: '店铺', account: '店铺:子账号' };
+  const context = {
+    guard() {},
+    patch(values) {
+      Object.assign(task, values);
+    },
+    async step(_name, work) {
+      return work();
+    },
+  };
+  for (let i = 0; i < 2; i++) {
+    await assert.rejects(
+      () => adapter.execute(task, shop, context),
+      (error) => error.code === 'unsupported_category_spec' && /原商品编号 123/.test(error.message),
+    );
+  }
+  assert.equal(routes.filter((route) => route.endsWith('/commit/create_new')).length, 1);
+  assert.equal(task.goodsId, '123');
+  assert.equal(task.apiDraft.commitId, '456');
+  assert.equal(task.saveAttemptedAt, undefined);
+});
+
 test('已经尝试API保存的任务只读原编号，读回失败不提交或分配新编号', async () => {
   const t = {
     productSnapshot: product(),
