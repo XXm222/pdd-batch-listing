@@ -25,7 +25,7 @@ import {
   isStructuredProduct,
   missingSkuImages,
 } from './domain';
-import { accountKey, accountKind, derivableShopName, normalizePddAccount } from './shop-account';
+import { accountKey, accountKind, normalizePddAccount } from './shop-account';
 import { rimDiameterLabel } from './pdd-rim';
 import { PictureEditor, SkuEditor } from './ProductEditors';
 import {
@@ -1366,9 +1366,7 @@ export function ShopManagement({
                   ? '目前仅支持拼多多，已有店铺资料仍保存在本机。'
                   : all.length
                     ? '试试其他店铺名称或登录账号。'
-                    : meta.derivesNameFromAccount
-                      ? '填写店铺名:子账号和密码，店铺名称会自动生成。'
-                      : `填写${meta.label}店铺名称、${meta.accountExample}和密码。`}
+                    : `填写${meta.label}店铺名称、登录账号和密码。`}
               </p>
               {!all.length && meta.enabled ? (
                 <button className="button" disabled={disabled} onClick={() => onAdd(platform)}>
@@ -1432,14 +1430,6 @@ export function ShopEditor({
   const requestClose = () => {
     if (!busy) dirty ? setClosing(true) : onClose();
   };
-  // 后台店铺名称才是权威值：主账号名（冒号前半段）经常与店铺名不同，
-  // 所以名称永远可以手填。拼多多留空时才推导，且把推导值先填进输入框让人确认。
-  const [nameTouched, setNameTouched] = useState(!!initial);
-  const suggestedName = meta.derivesNameFromAccount ? derivableShopName(form.account) : '';
-  useEffect(() => {
-    if (nameTouched) return;
-    setForm((f) => (f.name === suggestedName ? f : { ...f, name: suggestedName }));
-  }, [suggestedName, nameTouched]);
   const account = normalizePddAccount(form.account);
   const kind = accountKind(account);
   const normalizeNotice =
@@ -1457,7 +1447,7 @@ export function ShopEditor({
     setBusy(true);
     setError('');
     try {
-      const name = resolveShopName(form.name, account, !initial, chosenPlatform, suggestedName);
+      const name = resolveShopName(form.name);
       const workspace = await window.desktop.saveShop({
         ...form,
         name,
@@ -1527,25 +1517,17 @@ export function ShopEditor({
               <label>
                 店铺名称
                 <input
-                  data-autofocus={initial ? '' : undefined}
+                  data-autofocus
                   value={form.name}
                   required
                   maxLength={50}
-                  placeholder={
-                    suggestedName
-                      ? `与后台一致的名称，例如「${suggestedName}」`
-                      : '填写与后台一致的店铺名称'
-                  }
-                  onChange={(e) => {
-                    setNameTouched(true);
-                    setForm((f) => ({ ...f, name: e.target.value }));
-                  }}
+                  placeholder={meta.namePlaceholder}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 />
               </label>
               <label>
                 登录账号
                 <input
-                  data-autofocus={initial ? undefined : ''}
                   value={form.account}
                   required
                   maxLength={100}

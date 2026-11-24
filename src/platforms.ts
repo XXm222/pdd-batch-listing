@@ -19,9 +19,7 @@ export type PlatformDefinition = {
   accountExample: string;
   /** 新增店铺时的账号格式说明 */
   accountHint: string;
-  /** 店铺名称是否由登录账号推导（拼多多为「店铺名:子账号」） */
-  derivesNameFromAccount: boolean;
-  /** 登录账号是否使用「店铺名:子账号」格式 */
+  /** 是否支持「主账号:子账号」格式 */
   allowsSubAccount: boolean;
   /** 店铺名称输入框的提示 */
   namePlaceholder: string;
@@ -39,11 +37,10 @@ export const PLATFORMS: Record<PlatformId, PlatformDefinition> = {
     enabled: true,
     label: '拼多多',
     portal: 'https://mms.pinduoduo.com/home/',
-    accountExample: '例如：日用生活馆:运营账号',
-    accountHint: '账号格式：店铺名:子账号，店铺名称自动取冒号前的文字。',
-    derivesNameFromAccount: true,
+    accountExample: '例如：手机号或主账号:子账号',
+    accountHint: '用手机号登录就直接填手机号；子账号按后台的「主账号:子账号」填写。',
     allowsSubAccount: true,
-    namePlaceholder: '由登录账号中冒号前的店铺名自动生成',
+    namePlaceholder: '填写商家后台右上角头像下方的店铺名称',
     loginHint:
       '在已连接浏览器退出当前拼多多账号，自动填写此店铺保存的账号密码并点击登录。登录后核对店铺名称与子账号。',
     draftPublishing: true,
@@ -57,7 +54,6 @@ export const PLATFORMS: Record<PlatformId, PlatformDefinition> = {
     accountExample: '例如：淘宝会员名或手机号',
     accountHint:
       '填写千牛登录用的淘宝会员名或手机号；淘宝账号不是「店铺名:子账号」格式，店铺名称请手动填写。',
-    derivesNameFromAccount: false,
     allowsSubAccount: false,
     namePlaceholder: '填写与千牛后台一致的店铺名称',
     loginHint:

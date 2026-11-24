@@ -7,26 +7,12 @@ const JSZip = require('jszip');
 const { parseWorkbook, importFiles, collectFiles } = require('../dist-electron/electron/importer');
 const { Store } = require('../dist-electron/electron/store');
 const { problems, resolveShopName } = require('../dist-electron/src/domain');
-test('店铺名称手填优先，留空才由账号推导；格式边界与旧账号编辑兼容', () => {
-  // 后台店铺名称是权威值，主账号名（冒号前半段）经常与店铺名不同。
-  assert.equal(resolveShopName('手填名称', ' 日用生活馆:运营账号 ', true), '手填名称');
-  assert.equal(resolveShopName('', ' 日用生活馆:运营账号 ', true), '日用生活馆');
-  assert.equal(resolveShopName('', ' 日用生活馆 ： 运营账号 ', true), '日用生活馆');
-  assert.equal(resolveShopName('', '日用生活馆:运营账号：二级', true), '日用生活馆');
-  // 主账号登录（手机号 / 数字 ID / 邮箱 / 无冒号）推导不出店铺名，必须手填。
-  for (const account of ['demo_operator_local', '13812345678', '190551753', 'a@b.com']) {
-    assert.throws(() => resolveShopName('', account, true), /请填写与后台一致的店铺名称/);
-  }
-  // 冒号缺一边同样推导不出名称，手填依旧可用。
-  for (const account of [':运营账号', '店铺名:', '店铺名：  ', ' ：运营账号']) {
-    assert.equal(resolveShopName('手填名称', account, true), '手填名称');
-  }
-  assert.throws(() => resolveShopName('', `${'店'.repeat(51)}:运营`, true), /50/);
-  assert.equal(
-    resolveShopName('测试店铺 · 本机验证', 'demo_operator_local', false),
-    '测试店铺 · 本机验证',
-  );
-  assert.throws(() => resolveShopName('', 'demo_operator_local', false), /50/);
+test('店铺名称必填，去除首尾空白后最多 50 个字符', () => {
+  assert.equal(resolveShopName('  测试店铺 · 本机验证  '), '测试店铺 · 本机验证');
+  assert.equal(resolveShopName('店'.repeat(50)), '店'.repeat(50));
+  assert.throws(() => resolveShopName(''), /请填写与后台一致的店铺名称/);
+  assert.throws(() => resolveShopName('   '), /请填写与后台一致的店铺名称/);
+  assert.throws(() => resolveShopName('店'.repeat(51)), /50/);
 });
 const example = path.join(__dirname, '原始两页示例.xlsx');
 const imageRoot = path.join(__dirname, '../resources/assets');

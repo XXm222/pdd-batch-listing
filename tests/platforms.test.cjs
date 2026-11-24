@@ -10,7 +10,6 @@ const {
   platformMeta,
   requireEnabledPlatform,
 } = require('../dist-electron/src/platforms.js');
-const { resolveShopName, shopNameFromAccount } = require('../dist-electron/src/domain.js');
 
 test('平台清单固定为拼多多和淘宝，默认平台为拼多多', () => {
   assert.deepEqual([...PLATFORM_IDS], ['pdd', 'taobao']);
@@ -45,42 +44,14 @@ test('平台元数据包含界面文案、HTTPS 入口和能力边界', () => {
     if (!meta.draftPublishing) assert.ok(meta.draftPendingMessage.length > 0);
   }
   assert.equal(platformMeta('pdd').draftPublishing, true);
-  assert.equal(platformMeta('pdd').derivesNameFromAccount, true);
+  assert.match(platformMeta('pdd').namePlaceholder, /商家后台右上角头像下方/);
+  assert.match(platformMeta('pdd').accountHint, /手机号/);
   assert.equal(platformMeta('pdd').allowsSubAccount, true);
   // 淘宝草稿流程已适配（见 项目文档/25淘宝发品流程Workflow.md）。
   assert.equal(platformMeta('taobao').draftPublishing, true);
-  assert.equal(platformMeta('taobao').derivesNameFromAccount, false);
   assert.equal(platformMeta('taobao').allowsSubAccount, false);
   assert.equal(platformMeta('pdd').enabled, true);
   assert.equal(platformMeta('taobao').enabled, false);
   assert.equal(requireEnabledPlatform(undefined).id, 'pdd');
   assert.throws(() => requireEnabledPlatform('taobao'), /淘宝暂未开放/);
-});
-
-test('店铺名称手填优先，拼多多留空时按「店铺名:子账号」推导，淘宝必须手填', () => {
-  assert.equal(shopNameFromAccount(' 日用生活馆:运营账号 '), '日用生活馆');
-  assert.equal(resolveShopName('', '日用生活馆:运营账号', true, 'pdd'), '日用生活馆');
-  // 手填永远优先：主账号名与店铺名不同的商家靠这一条才能录对名称。
-  assert.equal(resolveShopName('手填名称', 'demo_operator', true, 'pdd'), '手填名称');
-  assert.equal(resolveShopName('邓禄普黑豆专卖店', '邓禄普:珠珠', true, 'pdd'), '邓禄普黑豆专卖店');
-  // 主账号（手机号 / 数字 ID）推导不出店名，留空即报错要求手填。
-  assert.throws(
-    () => resolveShopName('', 'demo_operator', true, 'pdd'),
-    /请填写与后台一致的店铺名称/,
-  );
-  assert.throws(
-    () => resolveShopName('', '13812345678', true, 'pdd'),
-    /请填写与后台一致的店铺名称/,
-  );
-
-  assert.equal(resolveShopName('  Mandla旗舰店  ', '会员名', true, 'taobao'), 'Mandla旗舰店');
-  assert.equal(resolveShopName('Mandla旗舰店', '会员名', false, 'taobao'), 'Mandla旗舰店');
-  // 淘宝账号不是「店铺名:子账号」，缺名称时不能凭账号推导。
-  assert.throws(
-    () => resolveShopName('', '日用生活馆:运营账号', true, 'taobao'),
-    /请填写淘宝店铺名称/,
-  );
-  assert.throws(() => resolveShopName('', '会员名', true, 'taobao'), /请填写淘宝店铺名称/);
-  // 未传平台时保持旧行为，避免影响既有调用方。
-  assert.equal(resolveShopName('', '日用生活馆:运营账号', true), '日用生活馆');
 });

@@ -1,6 +1,6 @@
 import type { Asset, ImageTarget, Product, Sku } from './types';
 import { RIM_OPTIONS } from './pdd-rim';
-import { DEFAULT_PLATFORM, platformMeta, type PlatformId } from './platforms';
+import type { PlatformId } from './platforms';
 export const uid = () => crypto.randomUUID();
 /** 淘宝模板的 templateFormat 标记；导入器与校验都按它分支。 */
 export const TAOBAO_TEMPLATE_FORMAT = '淘宝运营模板 v4';
@@ -439,42 +439,9 @@ export function productChanges(before: Product, after: Product) {
   }
   return changes;
 }
-export function shopNameFromAccount(account: string): string {
-  const text = account.trim();
-  const index = text.search(/[:：]/);
-  return index > 0 && text.slice(index + 1).trim() ? text.slice(0, index).trim() : '';
-}
-/**
- * 决定这条店铺记录最终保存的名称。
- *
- * 手填永远优先：后台店铺名称才是权威值，登录账号的前半段只是「主账号名」，
- * 很多商家两者并不相同（主账号 `邓禄普`，店铺 `邓禄普黑豆专卖店`），
- * 所以不能让推导结果覆盖用户输入，推导只在用户留空时兜底。
- */
-export function resolveShopName(
-  name: string,
-  account: string,
-  isNew: boolean,
-  platform: PlatformId = DEFAULT_PLATFORM,
-  derived?: string,
-): string {
-  const meta = platformMeta(platform);
-  const typed = String(name || '').trim();
-  if (!isNew) {
-    if (!typed) throw new Error('店铺名称须为 1 至 50 个字符');
-    if (typed.length > 50) throw new Error('店铺名称须为 1 至 50 个字符');
-    return typed;
-  }
-  const fallback = meta.derivesNameFromAccount
-    ? String(derived ?? shopNameFromAccount(account)).trim()
-    : '';
-  const resolved = typed || fallback;
-  if (!resolved)
-    throw new Error(
-      meta.derivesNameFromAccount
-        ? '请填写与后台一致的店铺名称；登录账号可按“店铺名:子账号”填写'
-        : `请填写${meta.label}店铺名称`,
-    );
-  if (resolved.length > 50) throw new Error('店铺名称须为 1 至 50 个字符');
-  return resolved;
+export function resolveShopName(name: string): string {
+  const typed = name.trim();
+  if (!typed) throw new Error('请填写与后台一致的店铺名称');
+  if (typed.length > 50) throw new Error('店铺名称须为 1 至 50 个字符');
+  return typed;
 }

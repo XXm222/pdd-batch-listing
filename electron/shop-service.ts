@@ -1,12 +1,6 @@
 import { Store } from './store';
 import { resolveShopName } from '../src/domain';
-import {
-  accountKey,
-  derivableShopName,
-  isMaskedAccount,
-  normalizePddAccount,
-} from '../src/shop-account';
-import { accountKind as pddAccountKind } from '../src/shop-account';
+import { accountKey, accountKind, isMaskedAccount, normalizePddAccount } from '../src/shop-account';
 import {
   DEFAULT_PLATFORM,
   isPlatformId,
@@ -49,13 +43,7 @@ export class ShopService {
         ? normalizePlatform(existing.platform)
         : DEFAULT_PLATFORM;
     requireEnabledPlatform(platform);
-    const name = resolveShopName(
-      raw.name,
-      account,
-      !existing,
-      platform,
-      derivableShopName(account),
-    );
+    const name = resolveShopName(raw.name);
     if (!platformMeta(platform).allowsSubAccount && account.includes(':'))
       throw new Error(
         `${platformMeta(platform).label}登录账号请填写会员名或手机号，不要使用“店铺名:子账号”格式`,
@@ -80,7 +68,7 @@ export class ShopService {
       credentialsSaved: true,
       updatedAt: new Date().toISOString(),
       platform,
-      accountKind: pddAccountKind(account),
+      accountKind: accountKind(account),
       mallId: sameAccount ? existing?.mallId : undefined,
       userId: sameAccount ? existing?.userId : undefined,
       boundAt: sameAccount ? existing?.boundAt : undefined,

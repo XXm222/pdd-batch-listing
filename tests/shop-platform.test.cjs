@@ -21,15 +21,15 @@ async function fixture(t) {
   return { store, service };
 }
 
-test('新增拼多多店铺：未传平台时按默认平台保存，店铺名称由账号推导', async (t) => {
+test('新增拼多多店铺：未传平台时按默认平台保存手填店铺名称', async (t) => {
   const { store, service } = await fixture(t);
   const shop = await service.save({
-    name: '',
+    name: '日用生活馆旗舰店',
     account: ' 日用生活馆:运营账号 ',
     password: 'isolated-password',
   });
   assert.equal(shop.platform, 'pdd');
-  assert.equal(shop.name, '日用生活馆');
+  assert.equal(shop.name, '日用生活馆旗舰店');
   assert.equal(shop.account, '日用生活馆:运营账号');
   assert.equal(store.secret(shop.id), 'cipher:isolated-password');
   assert.equal(store.all('shops')[0].platform, 'pdd');
@@ -88,12 +88,13 @@ test('非法平台字段被拒绝，账号重复仍然阻止保存', async (t) =
     /店铺平台不正确/,
   );
   await service.save({
-    name: '',
+    name: '店铺甲',
     account: '店铺甲:运营账号',
     password: 'isolated-password',
   });
   await assert.rejects(
-    () => service.save({ name: '', account: '店铺甲:运营账号', password: 'isolated-password' }),
+    () =>
+      service.save({ name: '店铺乙', account: '店铺甲:运营账号', password: 'isolated-password' }),
     /该账号已保存/,
   );
 });

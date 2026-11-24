@@ -6,7 +6,6 @@ const path = require('node:path');
 const {
   accountKey,
   accountKind,
-  derivableShopName,
   normalizePddAccount,
 } = require('../dist-electron/src/shop-account.js');
 const { Store } = require('../dist-electron/electron/store.js');
@@ -45,17 +44,6 @@ test('账号形态识别区分主账号与子账号', () => {
   assert.equal(accountKind('ops@example.com'), 'email');
   assert.equal(accountKind('demo_operator_local'), 'plain');
   assert.equal(accountKind('   '), 'plain');
-});
-
-test('只有像店名的前半段才允许推导店铺名称', () => {
-  assert.equal(derivableShopName('日用生活馆:运营账号'), '日用生活馆');
-  assert.equal(derivableShopName('邓禄普：珠珠'), '邓禄普');
-  // 主账号是手机号、数字 ID、邮箱时，前半段是账号名而不是店名。
-  assert.equal(derivableShopName('13812345678:店长'), '');
-  assert.equal(derivableShopName('190551753:店长'), '');
-  assert.equal(derivableShopName('ops@example.com:店长'), '');
-  assert.equal(derivableShopName('demo_operator'), '');
-  assert.equal(derivableShopName(':运营账号'), '');
 });
 
 test('去重键把同一账号的不同写法折叠成一把钥匙', () => {
@@ -112,7 +100,7 @@ test('编辑时只改写法视为同一账号，可以留空沿用原密码', as
   assert.equal(store.secret(saved.id), 'cipher:isolated-password');
 });
 
-test('掩码账号不允许保存，主账号需要手填店铺名称', async (t) => {
+test('掩码账号不允许保存，手机号和子账号都需要手填店铺名称', async (t) => {
   const { service } = await fixture(t);
   await assert.rejects(
     () =>
@@ -123,10 +111,12 @@ test('掩码账号不允许保存，主账号需要手填店铺名称', async (t
       }),
     /掩码/,
   );
-  await assert.rejects(
-    () => service.save({ name: '', account: '13812345678', password: 'isolated-password' }),
-    /请填写与后台一致的店铺名称/,
-  );
+  for (const account of ['13812345678', '邓禄普:珠珠']) {
+    await assert.rejects(
+      () => service.save({ name: '', account, password: 'isolated-password' }),
+      /请填写与后台一致的店铺名称/,
+    );
+  }
   const shop = await service.save({
     name: '邓禄普黑豆专卖店',
     account: '13812345678',
