@@ -40,20 +40,20 @@ for (const key of [
   'license',
 ])
   assert.deepEqual(built[key], source[key]);
-assert.ok(
-  fs
-    .readFileSync('运营资料/商品资料模板.xlsx')
-    .equals(fs.readFileSync('resources/templates/商品资料模板.xlsx')),
-);
-assert.ok(
-  fs
-    .readFileSync('运营资料/商品资料示例.xlsx')
-    .equals(fs.readFileSync('resources/templates/商品资料示例.xlsx')),
-);
-// 天猫发品表单字段与拼多多不同，模板分开维护，两份都要随包发布。
-for (const name of ['淘宝商品资料模板.xlsx', '淘宝商品资料示例.xlsx']) {
+// 模板只在 resources/templates 维护，运营资料 是本机工作目录，不进仓库。
+// 拼多多与天猫发品表单字段不同，模板分开维护，四份都要随包发布。
+for (const name of [
+  '商品资料模板.xlsx',
+  '商品资料示例.xlsx',
+  '淘宝商品资料模板.xlsx',
+  '淘宝商品资料示例.xlsx',
+]) {
+  const file = path.join('resources/templates', name);
+  assert.ok(fs.existsSync(file), `缺少模板 ${file}`);
+  assert.ok(fs.statSync(file).size > 0, `模板为空 ${file}`);
   assert.ok(
-    fs.readFileSync(`运营资料/${name}`).equals(fs.readFileSync(`resources/templates/${name}`)),
+    fs.existsSync(path.join(bundle, `app.asar.unpacked/resources/templates/${name}`)),
+    `安装包里缺少模板 ${name}`,
   );
 }
 assert.ok(

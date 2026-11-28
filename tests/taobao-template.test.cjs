@@ -169,14 +169,12 @@ test('淘宝主图超 5 张、详情图超 20 张会被拦住（拼多多上限�
   assert.ok(out.some((m) => /详情图最多 20 张/.test(m)));
 });
 
-test('仓库模板与运营资料里的淘宝模板保持一致', async () => {
+test('仓库里的淘宝模板随包发布且不为空', async () => {
+  // 模板只在 resources/templates 维护；运营资料 是本机工作目录，不进仓库。
   for (const name of ['淘宝商品资料模板.xlsx', '淘宝商品资料示例.xlsx']) {
-    assert.ok(
-      (await fs.readFile(path.resolve('resources/templates', name))).equals(
-        await fs.readFile(path.resolve('运营资料', name)),
-      ),
-      `${name} 在 resources/templates 与 运营资料 下不一致`,
-    );
+    const stat = await fs.stat(path.resolve('resources/templates', name)).catch(() => null);
+    assert.ok(stat, `缺少模板 resources/templates/${name}`);
+    assert.ok(stat.size > 0, `模板为空 resources/templates/${name}`);
   }
 });
 

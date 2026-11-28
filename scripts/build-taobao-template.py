@@ -14,7 +14,6 @@
     resources/templates/淘宝商品资料示例.xlsx   （填好并内嵌图片）
 """
 import os
-import shutil
 import sys
 
 from openpyxl import Workbook
@@ -251,13 +250,6 @@ def main():
         build(example, images_dir, with_example=True)
     else:
         print("未提供图片目录，跳过示例（示例需要内嵌图片）")
-    working = os.path.join(ROOT, "运营资料")
-    if os.path.isdir(working):
-        for name in ("淘宝商品资料模板.xlsx", "淘宝商品资料示例.xlsx"):
-            source = os.path.join(TEMPLATES, name)
-            if os.path.exists(source):
-                shutil.copy2(source, os.path.join(working, name))
-                print(f"已同步到 运营资料/{name}")
 
 
 if __name__ == "__main__":

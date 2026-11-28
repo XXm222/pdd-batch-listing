@@ -39,16 +39,6 @@ test('blank download stays empty and separate example includes two complete SKUs
     assert.equal(new Set(p.skus.map((s) => s.image)).size, 1);
     assert.deepEqual(problems(p), []);
     for (const a of assets) assert.ok((await fs.stat(path.join(directory, a.id))).size > 0);
-    assert.ok(
-      (await fs.readFile('resources/templates/商品资料模板.xlsx')).equals(
-        await fs.readFile('运营资料/商品资料模板.xlsx'),
-      ),
-    );
-    assert.ok(
-      (await fs.readFile('resources/templates/商品资料示例.xlsx')).equals(
-        await fs.readFile('运营资料/商品资料示例.xlsx'),
-      ),
-    );
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
