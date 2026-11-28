@@ -6,7 +6,7 @@
 
 <p align="center">给多家网店上新，只需从 Excel 导入一次商品图片、规格、价格和库存。</p>
 
-<p align="center"><strong>已适配拼多多，抖音电商（抖店）和淘宝即将上线。</strong></p>
+<p align="center"><strong>已适配拼多多和淘宝，抖音电商（抖店）即将上线。</strong></p>
 
 <p align="center">
   <a href="https://github.com/XXm222/ecommerce-batch-listing/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/XXm222/ecommerce-batch-listing?label=Release&amp;color=16836b"></a>
