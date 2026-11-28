@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="docs/assets/readme-banner.svg" alt="商品运营台 · Goods Workspace" width="100%">
+  <img src="docs/assets/readme-banner.svg" alt="电商批量上架助手" width="100%">
 </p>
 
-<h1 align="center">拼多多批量上架助手</h1>
+<h1 align="center">电商批量上架助手</h1>
 
-<p align="center">导入含图 Excel，核对商品和规格，批量保存拼多多后台草稿。</p>
+<p align="center">从 Excel 导入商品图片、规格、价格和库存，批量保存商品草稿。</p>
 
 <p align="center">
-  <a href="https://github.com/XXm222/pdd-batch-listing/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/XXm222/pdd-batch-listing?label=Release&amp;color=16836b"></a>
-  <a href="https://github.com/XXm222/pdd-batch-listing/actions/workflows/ci.yml"><img alt="代码检查" src="https://github.com/XXm222/pdd-batch-listing/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/XXm222/ecommerce-batch-listing/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/XXm222/ecommerce-batch-listing?label=Release&amp;color=16836b"></a>
+  <a href="https://github.com/XXm222/ecommerce-batch-listing/actions/workflows/ci.yml"><img alt="代码检查" src="https://github.com/XXm222/ecommerce-batch-listing/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/License-PolyForm%20Noncommercial-53627c"></a>
 </p>
 
@@ -22,7 +22,7 @@
 | --- | --- |
 | [**下载 Setup**](https://www.mandla.cn/goods-updates/windows-x64.exe) | [**下载 DMG**](https://www.mandla.cn/goods-updates/mac-arm64.dmg) |
 
-安装后在系统中打开 **商品运营台**。安装包自带运行时，后续可在「设置 → 软件更新」检查更新。macOS 安装包尚未完成 Apple Developer ID 签名与公证。详情和校验文件见 [GitHub Releases](https://github.com/XXm222/pdd-batch-listing/releases/latest)。
+当前公开安装包（0.1.65）的应用名称为 **商品运营台**。安装包自带运行时，后续可在「设置 → 软件更新」检查更新。macOS 安装包尚未完成 Apple Developer ID 签名与公证。详情和校验文件见 [GitHub Releases](https://github.com/XXm222/ecommerce-batch-listing/releases/latest)。
 
 ## 核心功能
 
@@ -46,7 +46,7 @@
 3. **连接浏览器并选店**。从 App 打开「设置 → 浏览器连接 → 连接教程」，在 Chrome 或 Edge 中加载 Kimi 浏览器扩展，确认目标店铺已登录。使用本机资料功能时可跳过此步。
 4. **保存草稿并查看结果**。选择商品和目标店铺，点击「开始填写并保存草稿」，在执行记录中核对结果。遇到验证码时按提示在浏览器中完成验证。
 
-> 当前支持拼多多草稿业务。正式发布由运营在拼多多商家后台完成。
+> 当前支持批量保存拼多多商品草稿，正式发布由商家在拼多多后台完成。抖音商品批量上架即将推出。
 
 ## 本地开发
 
@@ -55,8 +55,8 @@
 开发环境使用 Node.js `24.19.0` 和 pnpm `11.19.0`。
 
 ```bash
-git clone https://github.com/XXm222/pdd-batch-listing.git
-cd pdd-batch-listing
+git clone https://github.com/XXm222/ecommerce-batch-listing.git
+cd ecommerce-batch-listing
 pnpm install --frozen-lockfile
 node node_modules/electron/install.js
 pnpm dev
@@ -75,4 +75,4 @@ pnpm build
 
 ## 许可
 
-项目源码公开，采用 **PolyForm Noncommercial 1.0.0**。用于经营店铺、公司业务或商业分发前，请取得权利人书面许可。第三方依赖与浏览器扩展适用各自许可。 [LICENSE](LICENSE) · [NOTICE](NOTICE) · [联系维护者](https://github.com/XXm222/pdd-batch-listing/issues/new)
+项目源码公开，采用 **PolyForm Noncommercial 1.0.0**。用于经营店铺、公司业务或商业分发前，请取得权利人书面许可。第三方依赖与浏览器扩展适用各自许可。 [LICENSE](LICENSE) · [NOTICE](NOTICE) · [联系维护者](https://github.com/XXm222/ecommerce-batch-listing/issues/new)

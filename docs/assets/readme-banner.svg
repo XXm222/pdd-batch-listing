@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="410" viewBox="0 0 1440 410" role="img" aria-labelledby="title desc">
-  <title id="title">商品运营台 · Goods Workspace</title>
-  <desc id="desc">从 Excel 到拼多多商品草稿。右侧图形将商品表格、立体包裹和草稿核对连在一起。</desc>
+  <title id="title">电商批量上架助手</title>
+  <desc id="desc">从 Excel 到店铺商品草稿。右侧图形将商品表格、立体包裹和草稿核对连在一起。</desc>
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
       <stop stop-color="#11192b"/>
@@ -85,10 +85,10 @@
 
     <g transform="translate(83 76)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif">
       <path d="M0 7 10 1l10 6v12l-10 6-10-6zm0 0 10 6 10-6m-10 6v12" fill="none" stroke="#91ebcd" stroke-width="1.6" stroke-linejoin="round"/>
-      <text x="34" y="18" fill="#a9e3d4" font-size="15" font-weight="650" letter-spacing="3">GOODS WORKSPACE</text>
-      <text x="-4" y="141" fill="#f4f8ff" font-size="78" font-weight="750" letter-spacing="3">商品运营台</text>
+      <text x="34" y="18" fill="#a9e3d4" font-size="15" font-weight="650" letter-spacing="3">E-COMMERCE BATCH LISTING</text>
+      <text x="-4" y="141" fill="#f4f8ff" font-size="72" font-weight="750" letter-spacing="3">电商批量上架助手</text>
       <path d="M1 183h56" stroke="url(#mint)" stroke-width="3" stroke-linecap="round"/>
-      <text x="0" y="237" fill="#c2d2e9" font-size="31" font-weight="500">从 Excel 到拼多多商品草稿</text>
+      <text x="0" y="237" fill="#c2d2e9" font-size="31" font-weight="500">从 Excel 到店铺商品草稿</text>
     </g>
   </g>
   <rect x="1" y="1" width="1438" height="408" rx="24" fill="none" stroke="#7995b7" stroke-opacity=".32"/>

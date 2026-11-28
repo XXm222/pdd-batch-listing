@@ -1,6 +1,6 @@
 # 项目文档
 
-[项目首页](../README.md) · [最新版本](https://github.com/XXm222/pdd-batch-listing/releases/latest) · [问题反馈](https://github.com/XXm222/pdd-batch-listing/issues)
+[项目首页](../README.md) · [最新版本](https://github.com/XXm222/ecommerce-batch-listing/releases/latest) · [问题反馈](https://github.com/XXm222/ecommerce-batch-listing/issues)
 
 ## 使用指南
 
@@ -31,6 +31,6 @@
 | [0.1.64](38发布与验证0.1.64.md) | 店铺商品导出界面重构，包含打包、下载渠道及验收记录 |
 | [0.1.63](35发布与验证0.1.63.md) | 新建拼多多任务默认通过 API 保存草稿，包含真实样本读回记录 |
 | [0.1.61](32发布与验证0.1.61.md) | 商品资料四分区编辑与多规格表格 |
-| [更早的版本](https://github.com/XXm222/pdd-batch-listing/releases) | 安装包、更新说明与校验文件 |
+| [更早的版本](https://github.com/XXm222/ecommerce-batch-listing/releases) | 安装包、更新说明与校验文件 |
 
-[历史开发记录](22历史开发记录.md) · [此前首页中的版本摘要](https://github.com/XXm222/pdd-batch-listing/blob/1a5b1ad3e01f7785e375ade18b9ac6839011b9c9/README.md#版本更新)
+[历史开发记录](22历史开发记录.md) · [此前首页中的版本摘要](https://github.com/XXm222/ecommerce-batch-listing/blob/1a5b1ad3e01f7785e375ade18b9ac6839011b9c9/README.md#版本更新)

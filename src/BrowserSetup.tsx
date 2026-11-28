@@ -43,13 +43,13 @@ export function BrowserSetup({ status, checking, onCheck, onClose }: BrowserSetu
   const connectionHelp = checking
     ? '请保持浏览器打开。'
     : ready
-      ? '以后保持浏览器和商品运营台打开即可，不需要重复安装。'
+      ? '以后保持浏览器和电商批量上架助手打开即可，不需要重复安装。'
       : status?.state === 'extension_disconnected'
         ? '可能未安装、未开启扩展，或浏览器还没打开。已安装过的话，先打开浏览器再点“重新检测”。'
         : status?.state === 'service_unavailable'
-          ? '暂时无法确认扩展是否已安装。请先重新检测，仍失败时重启商品运营台。'
+          ? '暂时无法确认扩展是否已安装。请先重新检测，仍失败时重启电商批量上架助手。'
           : status?.state === 'version_mismatch'
-            ? '请打开下方的 Kimi 官方说明，联系管理员处理配套版本。商品运营台不会自动升级或重启已经运行的连接服务。'
+            ? '请打开下方的 Kimi 官方说明，联系管理员处理配套版本。电商批量上架助手不会自动升级或重启已经运行的连接服务。'
             : status?.state === 'unsupported'
               ? '目前内置连接服务支持 Mac（Apple 芯片或 Intel 芯片）和 Windows x64。请联系管理员确认这台电脑的安装版本。'
               : '安装前可以先检测，已连接就无需重复安装。';
@@ -87,7 +87,7 @@ export function BrowserSetup({ status, checking, onCheck, onClose }: BrowserSetu
       busy={!!busy}
       footer={
         <>
-          <span className="footer-note">安装时保持商品运营台打开</span>
+          <span className="footer-note">安装时保持电商批量上架助手打开</span>
           <div className="button-group">
             <button className="button" onClick={onClose} disabled={!!busy}>
               {ready ? '完成' : showInstallSteps ? '稍后再装' : '关闭'}

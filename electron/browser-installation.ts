@@ -17,7 +17,7 @@ export async function exportBrowserExtension(resourcesRoot: string, documents: s
       (file: { path: string }) => file.path === 'browser-extension/kimi-browser-extension.zip',
     )?.sha256 !== hash
   )
-    throw new Error('内置扩展安装包校验失败，请重新安装商品运营台');
+    throw new Error('内置扩展安装包校验失败，请重新安装电商批量上架助手');
   const zip = await JSZip.loadAsync(archive, { checkCRC32: true });
   const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'));
   if (

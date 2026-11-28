@@ -174,7 +174,7 @@ export default function App() {
   };
   useEffect(() => {
     if (!window.desktop) {
-      setFatal('请从商品运营台桌面应用打开，此页面需要本机文件与数据服务。');
+      setFatal('请从电商批量上架助手桌面应用打开，此页面需要本机文件与数据服务。');
       setLoading(false);
       return;
     }
@@ -368,8 +368,8 @@ export default function App() {
             <Boxes size={22} />
           </span>
           <div>
-            <strong>商品运营台</strong>
-            <span>GOODS WORKSPACE</span>
+            <strong>电商批量上架助手</strong>
+            <span>BATCH LISTING</span>
           </div>
         </div>
         <div className="sidebar-scroll">

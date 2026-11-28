@@ -126,7 +126,7 @@ export class BrowserBridge {
       await this.call<TabResult>('navigate', {
         url: this.startUrl,
         newTab: true,
-        group_title: '商品运营台',
+        group_title: '电商批量上架助手',
       }),
     );
   }
@@ -165,7 +165,7 @@ export class BrowserBridge {
       await this.call('navigate', {
         url,
         ...options,
-        ...(options.newTab ? { group_title: '商品运营台' } : {}),
+        ...(options.newTab ? { group_title: '电商批量上架助手' } : {}),
       });
     } catch (error) {
       if (!/beforeunload/i.test((error as Error).message)) throw error;
