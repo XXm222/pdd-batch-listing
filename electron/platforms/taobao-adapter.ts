@@ -187,7 +187,9 @@ export class TaobaoAdapter {
           if (event.status === 'running') this.patch(t, { phase: event.name }, event.name);
         },
         () => this.guard(),
-      ).run(shop, loginCheckOnly ? 'check' : 'relogin');
+        // 与拼多多一致：跑任务用 reuse —— 浏览器登的是别家店时只报错、不擅自登出；
+        // 只有店铺管理里点「退出并重新登录」（relogin）才允许退出当前账号再登目标店铺。
+      ).run(shop, loginCheckOnly ? 'check' : 'reuse');
       this.check('identity', true, shopIdentityMessage(shop));
     });
     if (loginCheckOnly) return;

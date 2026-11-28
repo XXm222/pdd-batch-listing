@@ -13,6 +13,7 @@ const {
   shopIdentityMessage,
   subAccountOf,
   taobaoIdentityProblem,
+  taobaoDifferentShop,
 } = require('../dist-electron/electron/platforms/taobao-identity.js');
 
 /** 最小 DOM 桩：只提供 TAOBAO_LOGIN_STATE 真正读取的字段。 */
@@ -160,6 +161,22 @@ test('店铺身份以名称为准，子账号格式才要求账号出现', () =>
   assert.equal(matchesTaobaoIdentity([], sub, ['Mandla旗舰店']), false);
   assert.equal(subAccountOf('Mandla旗舰店：运营小秘'), '运营小秘');
   assert.equal(subAccountOf('mandla_member'), '');
+});
+
+test('只有「确实是另一家店」才允许自动退出切店', () => {
+  const shop = { name: 'Mandla旗舰店', account: 'mandla_member' };
+  // 真的是别家店 → 可以自动退出
+  assert.equal(taobaoDifferentShop(['其他店铺'], shop), true);
+  // 读不到名称：可能页面没渲染完，不能擅自把运营已登好的店踢掉
+  assert.equal(taobaoDifferentShop([], shop), false);
+  assert.equal(taobaoDifferentShop([], shop, []), false);
+  // 仅大小写不同：是资料写错，退出重登解决不了
+  assert.equal(taobaoDifferentShop(['mandla旗舰店'], shop), false);
+  // 名称对得上：不需要退出
+  assert.equal(taobaoDifferentShop(['Mandla旗舰店'], shop), false);
+  // 有专门的店铺名称元素时以它为准
+  assert.equal(taobaoDifferentShop(['其他店铺'], shop, ['Mandla旗舰店']), false);
+  assert.equal(taobaoDifferentShop(['Mandla旗舰店'], shop, ['其他店铺']), true);
 });
 
 test('身份不符时的提示区分未读取、仅大小写不同和不一致', () => {

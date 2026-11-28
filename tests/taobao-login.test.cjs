@@ -9,6 +9,7 @@ const {
   TaobaoLogin,
   TAOBAO_LOGIN_URL,
   TAOBAO_WORKBENCH,
+  TAOBAO_LOGOUT_URL,
   TAOBAO_SHOW_PASSWORD_FORM,
   TAOBAO_SUBMIT_LOGIN,
 } = require('../dist-electron/electron/platforms/taobao-login.js');
@@ -50,6 +51,14 @@ function fixture(initial, options = {}) {
   const bridge = {
     async navigate(url) {
       calls.push(['navigate', url]);
+      // 退出店铺场景：离开退出页/工作台后页面变成登录页，由用例声明。
+      if (options.afterLogoutNavigate)
+        Object.assign(state, options.afterLogoutNavigate(url, state));
+    },
+    async call(action, args) {
+      calls.push([action, args && args.method ? args.method : args]);
+      if (args && args.method === 'Network.getCookies') return { cookies: options.cookies || [] };
+      return {};
     },
     async eval(code) {
       if (code === TAOBAO_LOGIN_STATE) return { ...state };
@@ -144,13 +153,49 @@ test('relogin：已登录所选店铺时直接核对，不退出也不重新提�
   );
 });
 
-test('relogin：当前登录的是其他店铺时要求人工切换，不自动退出', async () => {
+test('reuse：当前登录的是其他店铺时只报错，不动运营已登好的账号', async () => {
   const f = fixture(signedIn(['其他店铺'], ['其他店铺']));
-  const error = await rejection(f, 'relogin');
+  const error = await rejection(f, 'reuse');
   assert.equal(error.loginStatus, 'failed');
   assert.match(error.message, /退出登录后重新开始/);
   assert.equal(f.decrypts(), 0);
+  // 没有访问退出页，也没有清 Cookie
   assert.deepEqual(f.calls, [['navigate', TAOBAO_WORKBENCH]]);
+});
+
+test('relogin：确实是另一家店时先退出当前账号，再走登录流程（切店）', async () => {
+  // 第一次打开工作台时仍是「别家店已登录」；访问过退出入口之后才变成登录页
+  let visitedLogout = false;
+  const f = fixture(signedIn(['其他店铺'], ['其他店铺']), {
+    afterLogoutNavigate: (url) => {
+      if (url === TAOBAO_LOGOUT_URL) {
+        visitedLogout = true;
+        return {};
+      }
+      return visitedLogout && url === TAOBAO_WORKBENCH ? loginPage() : {};
+    },
+    // 提交保存的账号密码后，登录成目标店铺
+    afterSubmit: signedIn(),
+  });
+  await f.login.run(shop, 'relogin');
+  const urls = f.calls.filter(([kind]) => kind === 'navigate').map(([, url]) => url);
+  // 首次打开工作台判身份 → 走淘宝统一退出 → 再回工作台确认已退出
+  const logoutAt = urls.indexOf(TAOBAO_LOGOUT_URL);
+  assert.ok(logoutAt > 0, '应该访问过淘宝统一退出入口');
+  assert.ok(urls.slice(logoutAt).includes(TAOBAO_WORKBENCH), '退出后应回工作台确认已退出');
+  assert.match(f.events.map((event) => event.name).join('|'), /退出当前千牛账号/);
+});
+
+test('relogin：退出后仍显示已登录时，清淘宝域 Cookie 兜底', async () => {
+  const f = fixture(signedIn(['其他店铺'], ['其他店铺']), {
+    cookies: [{ name: 'cookie2', domain: '.taobao.com', path: '/' }],
+  });
+  const error = await rejection(f, 'relogin');
+  assert.equal(error.loginStatus, 'failed');
+  assert.match(error.message, /未能自动退出当前千牛账号/);
+  const methods = f.calls.filter(([kind]) => kind === 'cdp').map(([, method]) => method);
+  assert.ok(methods.includes('Network.getCookies'));
+  assert.ok(methods.includes('Network.deleteCookies'), '应兜底删除淘宝域 Cookie');
 });
 
 test('relogin：未登录且有保存密码时走密码登录并核对身份', async () => {

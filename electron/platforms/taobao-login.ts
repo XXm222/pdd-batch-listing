@@ -1,10 +1,11 @@
-import type { BrowserBridge } from '../browser-bridge';
+import { delay, type BrowserBridge } from '../browser-bridge';
 import { ExecutionError } from '../execution';
 import { ShopLoginError } from './shop-login';
 import {
   TAOBAO_LOGIN_STATE,
   matchesTaobaoIdentity,
   taobaoIdentityProblem,
+  taobaoDifferentShop,
   shopIdentityMessage,
   type TaobaoLoginState,
 } from './taobao-identity';
@@ -16,12 +17,19 @@ export const TAOBAO_WORKBENCH = 'https://myseller.taobao.com/home.htm';
  * 千牛登录页。登录表单在跨域 iframe 里，直接打开该地址才能由脚本填写；
  * 参数与「登录千牛工作台」实际使用的地址一致（2026-10-06 现场核对）。
  */
+/**
+ * 淘宝统一退出入口。切换店铺（换账号登录另一家店）时先走这里，
+ * 它会同时清掉服务端会话与 `.taobao.com` 下的登录 Cookie。
+ */
+export const TAOBAO_LOGOUT_URL =
+  'https://login.taobao.com/member/logout.jhtml?f=top&redirectURL=https%3A%2F%2Fwww.taobao.com%2F';
+
 export const TAOBAO_LOGIN_URL =
   'https://havanalogin.taobao.com/mini_login.htm?lang=zh_CN&appName=taobao&appEntrance=qianniu_pc_web' +
   '&styleType=vertical&notLoadSsoView=true&notKeepLogin=false&isMobile=false' +
   `&returnUrl=${encodeURIComponent(TAOBAO_WORKBENCH)}`;
 
-type Bridge = Pick<BrowserBridge, 'eval' | 'fill' | 'wait' | 'navigate'>;
+type Bridge = Pick<BrowserBridge, 'eval' | 'fill' | 'wait' | 'navigate' | 'call'>;
 
 /** 切到密码登录视图；返回 true 表示密码输入框已经可填。 */
 export const TAOBAO_SHOW_PASSWORD_FORM = `(() => {
@@ -108,6 +116,68 @@ export class TaobaoLogin {
       : '页面地址未确认';
     return new ShopLoginError('failed', `${message}（${where}）`, state?.structure);
   }
+  /** 切换店铺：退出当前千牛账号，退出后由调用方继续走登录流程。 */
+  private async logoutCurrent(shop: Shop, structure?: TaobaoLoginState['structure']) {
+    this.guard();
+    try {
+      await this.bridge.navigate(TAOBAO_LOGOUT_URL);
+      await delay(1500);
+    } catch {
+      // 退出页打不开不算失败，下面还有清 Cookie 的兜底。
+    }
+    if (await this.loggedOut()) return;
+    this.guard();
+    // 兜底：只删淘宝/天猫域下的 Cookie（不碰浏览器里其它网站）。
+    await this.clearTaobaoCookies();
+    if (await this.loggedOut()) return;
+    throw new ShopLoginError(
+      'failed',
+      `未能自动退出当前千牛账号（${shop.name}），请在浏览器手动退出后再点「退出并重新登录」`,
+      structure,
+    );
+  }
+
+  /** 打开工作台看是否已经不在登录态。 */
+  private async loggedOut(): Promise<boolean> {
+    this.guard();
+    try {
+      await this.bridge.navigate(TAOBAO_WORKBENCH);
+    } catch {
+      return false;
+    }
+    try {
+      const state = await this.poll(
+        (current) => current.trusted && !current.leftLogin,
+        '千牛工作台未加载',
+        20000,
+      );
+      return !state.leftLogin;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 精确删除淘宝 / 天猫域的 Cookie（含 HttpOnly），用于退出失败时兜底。 */
+  private async clearTaobaoCookies() {
+    const urls = [
+      'https://myseller.taobao.com',
+      'https://login.taobao.com',
+      'https://loginmyseller.taobao.com',
+      'https://sell.publish.tmall.com',
+      'https://www.taobao.com',
+    ];
+    const result = await this.bridge.call<{
+      cookies?: { name: string; domain: string; path: string }[];
+    }>('cdp', { method: 'Network.getCookies', params: { urls } });
+    for (const cookie of result?.cookies || []) {
+      if (!/(?:^|\.)(taobao|tmall|alicdn)\.com$/.test(cookie.domain)) continue;
+      await this.bridge.call('cdp', {
+        method: 'Network.deleteCookies',
+        params: { name: cookie.name, domain: cookie.domain, path: cookie.path },
+      });
+    }
+  }
+
   /** 只读核对：不再提交账号密码，只判断当前登录结果并核对店铺身份。 */
   private async verify(shop: Shop) {
     let result: TaobaoLoginState;
@@ -198,17 +268,24 @@ export class TaobaoLogin {
         throw this.timeoutState('千牛工作台未加载');
       throw error;
     }
-    // 已经登录：不再退出账号，直接核对身份；身份不符时明确要求人工切换。
+    // 已经登录：能对上就直接核对身份。
+    // 对上不了时分两种：
+    //   · 点的是「退出并重新登录」，且确实是**另一家店** → 自动退出当前账号再走登录流程（切店）；
+    //   · 其它情况（读不到名称 / 仅大小写不同 / reuse 模式）→ 不碰运营已登好的账号，只报错说明。
     if (initial.leftLogin) {
       const problem = taobaoIdentityProblem(initial.names, shop, initial.shopNames);
-      if (problem)
-        throw new ShopLoginError(
-          'failed',
-          `${problem}。当前浏览器登录的是其他店铺，请在该浏览器退出登录后重新开始`,
-          initial.structure,
-        );
-      await this.step('核对千牛后台店铺', () => this.verify(shop));
-      return;
+      if (problem) {
+        if (mode !== 'relogin' || !taobaoDifferentShop(initial.names, shop, initial.shopNames))
+          throw new ShopLoginError(
+            'failed',
+            `${problem}。当前浏览器登录的是其他店铺，请在该浏览器退出登录后重新开始`,
+            initial.structure,
+          );
+        await this.step('退出当前千牛账号', () => this.logoutCurrent(shop, initial.structure));
+      } else {
+        await this.step('核对千牛后台店铺', () => this.verify(shop));
+        return;
+      }
     }
     await this.step('打开千牛登录页', async () => {
       await this.bridge.navigate(TAOBAO_LOGIN_URL);

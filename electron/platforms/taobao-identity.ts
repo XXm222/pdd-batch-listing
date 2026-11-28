@@ -69,6 +69,25 @@ export function taobaoIdentityProblem(
     return `后台店铺名称与保存的“${shop.name}”仅大小写不同，请到店铺管理按后台名称修改后继续`;
   return `后台店铺名称与保存的“${shop.name}”不一致，请核对店铺管理中的名称和当前后台店铺`;
 }
+/**
+ * 当前登录的是**另一家店**（而不是「读不到名称」或「仅大小写不同」）。
+ *
+ * 只有这种情况才允许在「退出并重新登录」时自动退出当前账号：
+ *   · 读不到店铺名称 —— 可能是页面没渲染完，擅自退出会把运营已经登好的店踢掉；
+ *   · 仅大小写不同   —— 是资料里名字写错，退出重登也解决不了。
+ */
+export function taobaoDifferentShop(
+  names: string[],
+  shop: ShopIdentity,
+  shopNames: string[] = [],
+): boolean {
+  const scope = shopNames.length ? shopNames : names;
+  if (!scope.length) return false;
+  if (scope.includes(shop.name)) return false;
+  if (caseOnly(scope, shop.name)) return false;
+  return true;
+}
+
 export const shopIdentityMessage = (shop: Pick<ShopIdentity, 'name'>) =>
   `已核对千牛后台店铺：${shop.name}`;
 
