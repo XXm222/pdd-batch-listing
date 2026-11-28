@@ -35,22 +35,20 @@ test('新增拼多多店铺：未传平台时按默认平台保存手填店铺�
   assert.equal(store.all('shops')[0].platform, 'pdd');
 });
 
-test('禁用淘宝后不能新增店铺，已有店铺资料不受影响', async (t) => {
+test('淘宝已开放：可以新增淘宝店铺，平台字段原样保存', async (t) => {
   const { store, service } = await fixture(t);
-  await assert.rejects(
-    () =>
-      service.save({
-        name: 'Mandla旗舰店',
-        account: 'mandla_member',
-        password: 'isolated-password',
-        platform: 'taobao',
-      }),
-    /淘宝暂未开放/,
-  );
-  assert.deepEqual(store.all('shops'), []);
+  await service.save({
+    name: 'Mandla旗舰店',
+    account: 'mandla_member',
+    password: 'isolated-password',
+    platform: 'taobao',
+  });
+  const shops = store.all('shops');
+  assert.equal(shops.length, 1);
+  assert.equal(shops[0].platform, 'taobao');
 });
 
-test('旧淘宝店铺仍可读，修改被拒绝时不会重置平台或账号密码', async (t) => {
+test('旧淘宝店铺可读；改名后平台与账号密码不被重置', async (t) => {
   const { store, service } = await fixture(t);
   const saved = {
     id: require('node:crypto').randomUUID(),
@@ -61,18 +59,16 @@ test('旧淘宝店铺仍可读，修改被拒绝时不会重置平台或账号�
     updatedAt: '2026-10-06T00:00:00.000Z',
   };
   store.saveShop(saved, 'isolated-saved-secret');
-  await assert.rejects(
-    () =>
-      service.save({
-        id: saved.id,
-        name: 'Mandla旗舰店（新名）',
-        account: saved.account,
-        password: '',
-      }),
-    /淘宝暂未开放/,
-  );
-  assert.deepEqual(store.all('shops'), [saved]);
-  assert.equal(store.secret(saved.id), 'isolated-saved-secret');
+  await service.save({
+    id: saved.id,
+    name: 'Mandla旗舰店（新名）',
+    account: saved.account,
+    password: '',
+  });
+  const [after] = store.all('shops');
+  assert.equal(after.name, 'Mandla旗舰店（新名）');
+  assert.equal(after.platform, 'taobao', '改名不能把平台重置成拼多多');
+  assert.equal(store.secret(saved.id), 'isolated-saved-secret', '空密码不改已有凭据');
 });
 
 test('非法平台字段被拒绝，账号重复仍然阻止保存', async (t) => {

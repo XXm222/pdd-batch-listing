@@ -661,9 +661,8 @@ export default function App() {
                         {rows.map((p) => {
                           const issues = problems(p);
                           const missingImages = missingSkuImages(p).length;
-                          const enabled = platformMeta(
-                            isTaobaoProduct(p) ? 'taobao' : 'pdd',
-                          ).enabled;
+                          const platform = platformMeta(isTaobaoProduct(p) ? 'taobao' : 'pdd');
+                          const enabled = platform.enabled;
                           const image = p.images[p.main[0]];
                           return (
                             <tr key={p.id}>
@@ -706,7 +705,7 @@ export default function App() {
                                     }
                                   />
                                 ) : (
-                                  <span className="status neutral">淘宝暂未开放</span>
+                                  <span className="status neutral">{platform.label}暂未开放</span>
                                 )}
                                 <span className="cell-detail">
                                   {issues.length

@@ -36,6 +36,7 @@ import { BridgeSetup, ensureBrowserReady } from './bridge-setup';
 import { exportBrowserExtension } from './browser-installation';
 import { exportProductWorkbook } from './workbook-export';
 import { ShopCollector } from './shop-collector';
+import { TaobaoCollector } from './platforms/taobao-collector';
 import { AppUpdater } from './app-updater';
 import { prepareAutomaticInstall, acknowledgeAutomaticInstall } from './auto-install';
 import { isTaobaoProduct, safeImageName } from '../src/domain';
@@ -80,6 +81,9 @@ let agent: AgentService;
 let shopLoginBusy = false;
 let lastLoginShopId = '';
 let collector: ShopCollector;
+let taobaoCollector: TaobaoCollector;
+/** 当前活动的采集器：按店铺平台在 collection:list 时切换。 */
+let activeCollector: ShopCollector | TaobaoCollector;
 const root = () => app.getAppPath();
 const resource = (...segments: string[]) =>
   path.join(
@@ -621,8 +625,28 @@ else {
                 normalizePlatform(current.platform) === 'pdd',
             ),
       );
-      handler('collection:state', () => collector.state);
-      handler('collection:cancel', () => collector.cancel());
+      // 淘宝侧与拼多多同一套语义（列表采集 → 勾选导出含图 Excel），
+      // 只是模板换成淘宝版、校验按 taobao 平台。
+      taobaoCollector = new TaobaoCollector(
+        path.join(app.getPath('userData'), 'collection-cache'),
+        resource('templates', '淘宝商品资料模板.xlsx'),
+        decryptShopPassword,
+        (state) => {
+          if (window && !window.isDestroyed()) window.webContents.send('collection:changed', state);
+        },
+        (shop) =>
+          store
+            .all<Shop>('shops')
+            .some(
+              (current) =>
+                current.id === shop.id &&
+                current.updatedAt === shop.updatedAt &&
+                normalizePlatform(current.platform) === 'taobao',
+            ),
+      );
+      activeCollector = collector;
+      handler('collection:state', () => activeCollector.state);
+      handler('collection:cancel', () => activeCollector.cancel());
       handler(
         'collection:list',
         async (id: unknown) => {
@@ -631,7 +655,9 @@ else {
           const shop = store.all<Shop>('shops').find((s) => s.id === id);
           if (!shop?.credentialsSaved) throw Error('请先到店铺管理保存账号密码');
           requireEnabledPlatform(shop.platform);
-          return collector.list(shop);
+          activeCollector =
+            normalizePlatform(shop.platform) === 'taobao' ? taobaoCollector : collector;
+          return activeCollector.list(shop);
         },
         true,
       );
@@ -648,10 +674,10 @@ else {
             new Set(ids).size !== ids.length
           )
             throw Error('一次请选择 1 至 50 件商品导出');
-          if (ids.some((id) => !collector.state.goods.some((g) => g.goodsId === id)))
+          if (ids.some((id) => !activeCollector.state.goods.some((g) => g.goodsId === id)))
             throw Error('所选商品不在当前店铺列表');
           const single = ids.length === 1;
-          const name = collector.state.shopName.replace(/[\\/:*?"<>|]/g, '-').slice(0, 40);
+          const name = activeCollector.state.shopName.replace(/[\\/:*?"<>|]/g, '-').slice(0, 40);
           const selected = await dialog.showSaveDialog(window!, {
             title: single ? '保存商品 Excel' : '保存商品 Excel 压缩包',
             defaultPath: path.join(
@@ -667,13 +693,13 @@ else {
           });
           if (selected.canceled || !selected.filePath) return null;
           guardAgent();
-          return collector.export(ids, selected.filePath);
+          return activeCollector.export(ids, selected.filePath);
         },
         true,
       );
       handler('collection:folder', () => {
-        if (collector.state.outputPath && fs.existsSync(collector.state.outputPath))
-          shell.showItemInFolder(collector.state.outputPath);
+        if (activeCollector.state.outputPath && fs.existsSync(activeCollector.state.outputPath))
+          shell.showItemInFolder(activeCollector.state.outputPath);
       });
       handler(
         'products:save',
@@ -1065,7 +1091,7 @@ else {
     if (process.platform !== 'darwin') app.quit();
   });
   app.on('before-quit', () => {
-    collector?.cancel();
+    activeCollector?.cancel();
     if (updateTimer) clearInterval(updateTimer);
     updater?.cancel();
     store?.close();

@@ -1265,9 +1265,7 @@ export function ShopManagement({
             <div className="connection-note" role="status">
               <AlertCircle size={16} />
               <p>
-                {!meta.enabled
-                  ? `${meta.label}暂未开放，已有资料保留；目前仅支持拼多多。`
-                  : meta.draftPendingMessage}
+                {!meta.enabled ? `${meta.label}暂未开放，已有资料保留。` : meta.draftPendingMessage}
               </p>
             </div>
           ) : null}

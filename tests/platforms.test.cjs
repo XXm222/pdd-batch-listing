@@ -50,8 +50,9 @@ test('平台元数据包含界面文案、HTTPS 入口和能力边界', () => {
   // 淘宝草稿流程已适配（见 项目文档/25淘宝发品流程Workflow.md）。
   assert.equal(platformMeta('taobao').draftPublishing, true);
   assert.equal(platformMeta('taobao').allowsSubAccount, false);
+  // 淘宝已开放（见 项目文档/25淘宝发品流程Workflow.md）
   assert.equal(platformMeta('pdd').enabled, true);
-  assert.equal(platformMeta('taobao').enabled, false);
+  assert.equal(platformMeta('taobao').enabled, true);
   assert.equal(requireEnabledPlatform(undefined).id, 'pdd');
-  assert.throws(() => requireEnabledPlatform('taobao'), /淘宝暂未开放/);
+  assert.equal(requireEnabledPlatform('taobao').id, 'taobao');
 });

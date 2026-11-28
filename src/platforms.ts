@@ -48,7 +48,7 @@ export const PLATFORMS: Record<PlatformId, PlatformDefinition> = {
   },
   taobao: {
     id: 'taobao',
-    enabled: false,
+    enabled: true,
     label: '淘宝',
     portal: 'https://myseller.taobao.com/home.htm',
     accountExample: '例如：淘宝会员名或手机号',
@@ -81,6 +81,6 @@ export function platformMeta(value: unknown): PlatformDefinition {
 
 export function requireEnabledPlatform(value: unknown): PlatformDefinition {
   const meta = platformMeta(value);
-  if (!meta.enabled) throw new Error(`${meta.label}暂未开放，目前仅支持拼多多`);
+  if (!meta.enabled) throw new Error(`${meta.label}暂未开放`);
   return meta;
 }

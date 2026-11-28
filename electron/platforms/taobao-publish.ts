@@ -253,6 +253,16 @@ export function taobaoSkuPlan(product: Pick<Product, 'skus'>): TaobaoSkuPlan {
         .map((d) => `${d.name}(${d.values.length})`)
         .join(' × ')} 共需 ${expected} 条，实际 ${rows.length} 条；请在规格清单补全全部组合`,
     };
+  // 顺序必须与后台生成的表格一致：维度1外层、维度2内层（实跑确认，
+  // 见 verification/taobao-20261006/publish-flow/多维度实跑记录.md）。
+  // 后台按「维度顺序 + 取值顺序」做笛卡尔积逐行展开，而 Excel 里 SKU 的书写顺序可以任意，
+  // 不重排就会把价格/库存填到错误的规格行上。
+  const rank = (row: TaobaoSkuRow) =>
+    row.values.reduce(
+      (acc, value, i) => acc * dimensions[i].values.length + dimensions[i].values.indexOf(value),
+      0,
+    );
+  rows.sort((a, b) => rank(a) - rank(b));
   return { kind: 'dimensions', dimensions, rows };
 }
 
@@ -276,13 +286,27 @@ export function taobaoImageProblems(
   return problems;
 }
 
-/** 各图片位的实际数量，写进检查项说明供运营核对；不作为失败条件。 */
+/**
+ * 各图片位的实际数量，写进检查项说明供运营核对；不作为失败条件。
+ *
+ * `unfilled` 说明「商品资料里有、但本流程没有自动上传」的图片位及资料张数：
+ * 这几个位（3:4主图 / 白底图 / 卖点图）的上传控件在**跨域 iframe** 的图片空间里，
+ * 当前运行时无法操作，因此必须把差异显式写出来，避免运营看到「0 张」误以为已核对过。
+ */
 export function taobaoImageSummary(
   slots: Record<string, { count: number; firstSrc?: string | null }>,
+  unfilled: Record<string, number> = {},
 ): string {
-  return TAOBAO_IMAGE_SLOTS.map((slot) => `${slot.label} ${slots[slot.id]?.count ?? 0} 张`).join(
-    '；',
-  );
+  const base = TAOBAO_IMAGE_SLOTS.map(
+    (slot) => `${slot.label} ${slots[slot.id]?.count ?? 0} 张`,
+  ).join('；');
+  const notes = Object.entries(unfilled)
+    .filter(([id, count]) => count > 0 && (slots[id]?.count ?? 0) === 0)
+    .map(([id, count]) => {
+      const label = TAOBAO_IMAGE_SLOTS.find((slot) => slot.id === id)?.label ?? id;
+      return `${label}资料有 ${count} 张但未自动上传（上传控件在跨域 iframe 内，需人工补）`;
+    });
+  return notes.length ? `${base}；${notes.join('；')}` : base;
 }
 
 // ─────────────────────── 页面脚本 ───────────────────────
@@ -292,6 +316,17 @@ const script = (body: string) => `(() => {${TB_SHOWN}${body}})()`;
 /** 「确认，下一步」是否可用。 */
 export const TB_NEXT_READY = script(
   `const b=[...document.querySelectorAll('button')].filter(e=>shown(e)&&(e.innerText||'').trim()==='确认，下一步');return b.length===1&&!b[0].disabled;`,
+);
+
+/**
+ * 「确认，下一步」是否已出现（**不看 disabled**）。
+ *
+ * 实测该按钮会长期携带 `disabled` 属性，同时样式是半透明 + `cursor:not-allowed`，
+ * 但真实鼠标点击是有效的（点了会进商品表单）。按 `!disabled` 判断会空等到超时，
+ * 所以就绪判断只要求它出现，真正的可用性由「点击后表单是否出现」验证。
+ */
+export const TB_NEXT_PRESENT = script(
+  `return [...document.querySelectorAll('button')].filter(e=>shown(e)&&(e.innerText||'').trim()==='确认，下一步').length===1;`,
 );
 
 /** 读取 AI 给出的类目候选（选中项没有 normal 类）。
@@ -355,6 +390,7 @@ const STAGES: Record<string, TaskStep> = {
   填写价格与库存: 'skus',
   填写物流与售后: 'services',
   核对图片落位: 'images',
+  补充图片位: 'images',
   提交前校验: 'pre_save',
   提交保存草稿: 'save',
   读回草稿: 'draft_list',
@@ -469,8 +505,14 @@ export class TaobaoPublish {
     };
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (await settled()) return;
-      await this.bridge.call('click', { selector: await this.markVisible(markCode) });
-      if (await tick()) return;
+      // 选择器点击失败不能让整轮中断：有些环境（Playwright 语义）会拒绝点击带
+      // disabled 属性的元素，而这类按钮用真实鼠标点又是有效的 —— 留给下面的 realClick。
+      try {
+        await this.bridge.call('click', { selector: await this.markVisible(markCode) });
+        if (await tick()) return;
+      } catch {
+        // 继续尝试真实鼠标点击
+      }
       try {
         await this.realClick(await this.markVisible(markCode));
       } catch (error) {
@@ -635,7 +677,10 @@ export class TaobaoPublish {
           name: path.basename(file),
         }));
         await this.bridge.uploadMany(TAOBAO_IMAGE_UPLOAD_SELECTOR, files);
-        await this.waitFor(TB_NEXT_READY, 90000, '图片上传后「确认，下一步」未可用');
+        // 只等按钮出现，不等它「看起来可用」：实测「确认，下一步」会一直挂着
+        // disabled 属性（且半透明、cursor:not-allowed），但点击实际有效。
+        // 真正的判定交给下一步的「点击 → 等表单出现」。
+        await this.waitFor(TB_NEXT_PRESENT, 90000, '图片上传后没有出现「确认，下一步」');
       },
       STAGES['上传轮播图与详情图'],
     );
@@ -713,7 +758,15 @@ export class TaobaoPublish {
         // 货号必须在类目切换之后填，并回读校验（切换类目会清空它）。
         await this.fillAndVerifyCode(product.code);
         try {
-          await this.waitFor(TB_NEXT_READY, 40000, '「确认，下一步」未可用');
+          // 同上：不能靠 disabled 判断可用性；直接点，点完用「表单是否出现」验证。
+          const nextButton = `[...document.querySelectorAll('button')].filter(e=>shown(e)).find(e=>(e.innerText||'').trim()==='确认，下一步')`;
+          await this.clickUntil(
+            script(
+              `const e=${nextButton};if(!e)return '';e.setAttribute('__ATTR__','1');return '[__ATTR__]';`,
+            ),
+            `!!document.getElementById('sell-field-title')`,
+            '「确认，下一步」进入商品表单',
+          );
         } catch (error) {
           // 把确认页现场带出来：多半是品牌没选中或货号被重渲染清掉。
           const state = await this.bridge.eval<Record<string, unknown>>(
@@ -742,15 +795,6 @@ export class TaobaoPublish {
         }
         this.check('category', 'passed', `类目：${candidates[index].text}`);
         this.check('brand', 'passed', `品牌=${brand}（取自该类目的店铺授权项）`);
-        await this.clickOnce(
-          `[...document.querySelectorAll('button')].filter(e=>shown(e)).find(e=>(e.innerText||'').trim()==='确认，下一步')`,
-          '进入商品表单',
-        );
-        await this.waitFor(
-          `!!document.getElementById('sell-field-title')`,
-          40000,
-          '商品表单未打开',
-        );
       },
       STAGES['核对类目与品牌'],
     );
@@ -914,9 +958,101 @@ export class TaobaoPublish {
               slots: snapshot.slots,
             },
           );
-        this.check('images', 'passed', taobaoImageSummary(snapshot.slots));
+        // 商品资料里给了这几位但流程没上传：如实写进说明，不假装核对过。
+        this.check(
+          'images',
+          'passed',
+          taobaoImageSummary(snapshot.slots, {
+            threeToFourImages: (product.threeToFour || []).length,
+            yinHeWhiteBgImage: (product.whiteBg || []).length,
+            uspImageV3: (product.usp || []).length,
+          }),
+        );
       },
       STAGES['核对图片落位'],
+    );
+
+    // 9.5) 补充图片位：3:4主图 / 白底图 / 卖点图。
+    //      这几位在页面上的上传控件位于**跨域 iframe**（图片空间 sucai-selector-ng）里，
+    //      当前运行时无法操作 iframe 内的 DOM。所以走接口：
+    //        ① 用 stream-upload.taobao.com 上传本地图片拿 alicdn url
+    //        ② 在提交前给 XHR 打补丁，把 url 写进 jsonBody 的对应字段
+    //      实测字段名见 verification/taobao-20261006/publish-flow/图片位上传调研.md。
+    await this.deps.step(
+      '补充图片位',
+      async () => {
+        const extra: {
+          threeToFourImages?: { url: string; pix: string; name: string }[];
+          whiteBgImage?: { url: string; pix: string; name: string }[];
+          auctionVideos?: {
+            videoInfo: { videoId: number; sceneCode: string; sceneName: string };
+            videoType: string;
+          }[];
+        } = {};
+        const notes: string[] = [];
+
+        const upload = async (names: string[], label: string) => {
+          const done: { url: string; pix: string; name: string }[] = [];
+          for (const name of names) {
+            const file = this.assetPath(product, name);
+            const uploaded = await this.uploadImageToLibrary(file);
+            if (!uploaded) {
+              notes.push(`${label}「${name}」上传失败`);
+              continue;
+            }
+            done.push(uploaded);
+          }
+          return done;
+        };
+
+        const threeToFour = await upload(product.threeToFour || [], '3:4主图');
+        if (threeToFour.length) extra.threeToFourImages = threeToFour;
+        const whiteBg = await upload(product.whiteBg || [], '白底图');
+        if (whiteBg.length) extra.whiteBgImage = whiteBg;
+
+        // 商品视频：只按 videoId 挂载（视频需先存在于视频空间）。
+        // 实测结构见 图片位上传调研.md；最小可用字段是 videoInfo.videoId + videoType。
+        const videoId = String(product.videoId || '').trim();
+        if (/^\d{6,}$/.test(videoId))
+          extra.auctionVideos = [
+            {
+              videoInfo: {
+                videoId: Number(videoId),
+                sceneCode: 'auctionVideos',
+                sceneName: 'auctionVideos',
+              },
+              videoType: '宝贝讲解',
+            },
+          ];
+
+        // 卖点图（功能卖点图）后台只有 AI「制作卖点图」入口，没有本地上传，本版不做。
+        const pending: string[] = [];
+
+        if (extra.threeToFourImages || extra.whiteBgImage || extra.auctionVideos)
+          await this.installSubmitImagePatch(extra);
+        if (!extra.threeToFourImages && !extra.whiteBgImage && !pending.length) {
+          this.check('extra_images', 'not_applicable', '商品资料未提供 3:4主图 / 白底图 / 卖点图');
+          return;
+        }
+        this.check(
+          'extra_images',
+          notes.length ? 'failed' : 'passed',
+          [
+            extra.threeToFourImages
+              ? `3:4主图 ${extra.threeToFourImages.length} 张（接口落位）`
+              : '',
+            extra.whiteBgImage ? `白底图 ${extra.whiteBgImage.length} 张（接口落位）` : '',
+            extra.auctionVideos
+              ? `商品视频 1 个（videoId ${extra.auctionVideos[0].videoInfo.videoId}）`
+              : '',
+            pending.length ? `${pending.join('、')}：提交字段尚未定位，需人工补` : '',
+            notes.length ? `失败：${notes.join('；')}` : '',
+          ]
+            .filter(Boolean)
+            .join('；'),
+        );
+      },
+      STAGES['补充图片位'],
     );
 
     // 10) 提交。
@@ -949,6 +1085,87 @@ export class TaobaoPublish {
         return { goodsId: saved.id, url: saved.url };
       },
       STAGES['提交保存草稿'],
+    );
+  }
+
+  /**
+   * 上传一张本地图片到天猫图片空间，返回可直接写进提交 payload 的 url / pix。
+   *
+   * 为什么用自建隐藏 input 承载文件：CDP 只能对 `input[type=file]` 落文件，而页面自带的
+   * 两个隐藏 input 属于「吊牌图」和「产品确认」，借用会触发它们各自的 onChange。
+   * 这里新建一个游离 input 只当文件载体，用完即删，不干扰页面。
+   */
+  private async uploadImageToLibrary(
+    file: string,
+  ): Promise<{ url: string; pix: string; name: string } | null> {
+    const CARRIER = 'data-tb-upload-carrier';
+    const UPLOAD_URL =
+      'https://stream-upload.taobao.com/api/upload.api?_input_charset=utf-8&appkey=tu' +
+      '&autoCompress=false&compress=false&folderId=0&picCompress=true&watermark=false';
+    await this.bridge.eval(
+      script(
+        `const old=document.querySelector('[${CARRIER}]');if(old)old.remove();` +
+          `const i=document.createElement('input');i.type='file';i.setAttribute('${CARRIER}','1');` +
+          `i.style.position='fixed';i.style.left='-9999px';document.body.appendChild(i);` +
+          `window.__tbUploadResult=undefined;return true;`,
+      ),
+    );
+    await this.bridge.uploadMany(`input[${CARRIER}]`, [{ path: file, name: path.basename(file) }]);
+    // 结果回填到 window 再轮询：不依赖页面 eval 是否 awaitPromise。
+    await this.bridge.eval(
+      script(
+        `const i=document.querySelector('[${CARRIER}]');` +
+          `if(!i||!i.files||!i.files.length){window.__tbUploadResult=null;return true;}` +
+          `const fd=new FormData();fd.append('file',i.files[0]);` +
+          `fetch(${JSON.stringify(UPLOAD_URL)},{method:'POST',credentials:'include',body:fd})` +
+          `.then(r=>r.json()).then(j=>{window.__tbUploadResult=(j&&j.success&&j.object)?` +
+          `{url:j.object.url,pix:j.object.pix,name:j.object.fileName}:null;})` +
+          `.catch(()=>{window.__tbUploadResult=null;});return true;`,
+      ),
+    );
+    const result = await this.bridge.wait(
+      async () =>
+        await this.bridge.eval<{ url: string; pix: string; name: string } | null>(
+          script(`return window.__tbUploadResult===undefined?null:window.__tbUploadResult;`),
+        ),
+      45000,
+      `图片上传超时：${path.basename(file)}`,
+    );
+    await this.bridge.eval(
+      script(`const i=document.querySelector('[${CARRIER}]');if(i)i.remove();return true;`),
+    );
+    return result;
+  }
+
+  /**
+   * 提交前给 XHR 打补丁：命中 `/tmall/submit.htm` 时把图片位写进 `jsonBody`。
+   *
+   * 只补图片字段，其余 80 多个字段仍由页面自己组装 —— 比重建 51KB payload 风险小得多。
+   * 字段名来自实测抓包（见 图片位上传调研.md）。
+   */
+  private async installSubmitImagePatch(extra: Record<string, unknown>) {
+    await this.bridge.eval(
+      script(
+        `window.__tbExtraImages=${JSON.stringify(extra)};` +
+          `if(window.__tbPatchInstalled)return true;window.__tbPatchInstalled=true;` +
+          `const open=XMLHttpRequest.prototype.open;` +
+          `XMLHttpRequest.prototype.open=function(m,u){this.__tbUrl=String(u||'');return open.apply(this,arguments);};` +
+          `const send=XMLHttpRequest.prototype.send;` +
+          `XMLHttpRequest.prototype.send=function(body){` +
+          `try{` +
+          `if(typeof body==='string'&&String(this.__tbUrl||'').indexOf('submit.htm')>=0&&body.indexOf('jsonBody=')>=0){` +
+          `const p=new URLSearchParams(body);const j=JSON.parse(p.get('jsonBody'));` +
+          `const x=window.__tbExtraImages||{};` +
+          `if(x.threeToFourImages&&x.threeToFourImages.length)j.threeToFourImages=x.threeToFourImages;` +
+          `if(x.whiteBgImage&&x.whiteBgImage.length)j.yinHeWhiteBgImage=x.whiteBgImage;` +
+          `if(x.auctionVideos&&x.auctionVideos.length)j.auctionVideos=x.auctionVideos;` +
+          `p.set('jsonBody',JSON.stringify(j));body=p.toString();` +
+          `}else if(this.__tbUrl&&String(this.__tbUrl).indexOf('submit.htm')>=0){` +
+          `const x=window.__tbExtraImages||{};window.__tbPatchMissed=true;` +
+          `}` +
+          `}catch(e){window.__tbPatchError=String(e&&e.message||e);}` +
+          `return send.call(this,body);};return true;`,
+      ),
     );
   }
 
@@ -1156,13 +1373,23 @@ export class TaobaoPublish {
         }
         const before = await this.readSnippetNumber(labelSnippet);
         await this.typeRaw(await this.markVisible(script(`return ${lastInput};`)), value);
-        if (!(await this.waitForSnippetNumber(labelSnippet, before + 1, 8000)))
+        if (!(await this.waitForSnippetNumber(labelSnippet, before + 1, 8000))) {
+          // 有些销售属性不是自由文本：例如「适用体重」是「下限—上限 + 单位(kg)」的
+          // 区间型，`[规格]` 输入框只是展开触发器，单击后会展开两个「请输入数量」框
+          // 和一个单位下拉（见 verification/.../probe-weight-input2.jpg）。
+          // 往触发框里塞文字永远不会生效，这里要给出可以照着做的说明。
+          const kind = await this.detectValueInputKind(wrap);
           throw new ExecutionError(
             'form_changed',
-            `属性「${dimension.name}」的值「${value}」没有提交（计数仍为 ${before}）`,
+            kind === 'range'
+              ? `属性「${dimension.name}」是**数值区间型**销售属性（下限—上限＋单位），本版只支持自由文本型属性；` +
+                  `请改用自由文本型属性（如 颜色 / 尺寸 / 容量），或人工在后台建规格`
+              : `属性「${dimension.name}」的值「${value}」没有提交（计数仍为 ${before}；取值形态判定为 ${kind}）`,
             'inspect_form',
             true,
+            { dimension: dimension.name, value, kind },
           );
+        }
       }
     }
 
@@ -1190,6 +1417,28 @@ export class TaobaoPublish {
         `const d=${DRAWER};return d?(d.innerText||'').replace(/\\s+/g,' ').slice(0,160):'抽屉不存在';`,
       ),
     );
+  }
+
+  /**
+   * 判定一个销售属性的取值形态。
+   *
+   * 实测（沐浴桶/沐浴盆类目的「适用体重」）：区间型属性的 `[规格]` 框只是展开触发器，
+   * 真实输入是展开后的两个「请输入数量」框 + 一个单位下拉（kg）。
+   * 往触发框里写自由文本永远不生效，所以要先分型再决定报错文案。
+   */
+  private async detectValueInputKind(wrapExpr: string): Promise<'text' | 'range' | 'unknown'> {
+    const raw = await this.bridge.eval<string>(
+      script(
+        `const w=${wrapExpr};if(!w)return 'unknown';` +
+          `const inputs=[...w.querySelectorAll('input')].filter(shown);` +
+          `if(inputs.filter(e=>(e.placeholder||'').includes('请输入数量')).length>=2)return 'range';` +
+          `const units=[...w.querySelectorAll('.next-select-trigger')].filter(shown).map(e=>(e.innerText||'').trim());` +
+          `if(units.some(t=>/^(kg|g|斤|cm|mm|m|ml|L)$/.test(t)))return 'range';` +
+          `const text=inputs.filter(e=>!['checkbox','radio','file','hidden'].includes(e.type)&&!(e.placeholder||'').startsWith('备注'));` +
+          `return text.length?'text':'unknown';`,
+      ),
+    );
+    return raw === 'range' || raw === 'text' ? raw : 'unknown';
   }
 
   /** 读一个 sell-field 文本字段的当前值（可见实例）。 */
@@ -1251,15 +1500,18 @@ export class TaobaoPublish {
 
   /** 逐行填 SKU 表的价格与数量（td2=价格、td3=数量）。 */
   private async fillSkuRows(rows: TaobaoSkuRow[]) {
-    const cell = (row: number, column: number) =>
+    // 必须按单元格类名定位价格/数量列，不能按下标：表格前面有几个规格列取决于维度数
+    // （单维度时价格是第 3 个 td，双维度时被挤到第 4 个）。实测结构：
+    // [规格…, td.sell-sku-cell-money, td.sell-sku-cell-number]。
+    const cell = (row: number, column: 'money' | 'number') =>
       script(
-        `const e=[...document.querySelectorAll('#sell-field-sku table tbody tr')][${row}]` +
-          `?.querySelectorAll('td')[${column}]?.querySelector('input');` +
+        `const tr=[...document.querySelectorAll('#sell-field-sku table tbody tr')][${row}];` +
+          `const e=tr?.querySelector('td.sell-sku-cell-${column} input');` +
           `if(!e)return '';e.setAttribute('__ATTR__','1');return '[__ATTR__]';`,
       );
     for (const [index, row] of rows.entries()) {
-      await this.typeRaw(await this.markVisible(cell(index, 2)), row.price);
-      await this.typeRaw(await this.markVisible(cell(index, 3)), row.quantity);
+      await this.typeRaw(await this.markVisible(cell(index, 'money')), row.price);
+      await this.typeRaw(await this.markVisible(cell(index, 'number')), row.quantity);
     }
   }
 

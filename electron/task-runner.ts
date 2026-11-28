@@ -33,8 +33,16 @@ export function prepareTasks(
   const selected = input.productIds.map((id) => products.find((p) => p.id === id));
   if (selected.some((p) => !p || problems(p).length))
     throw new Error('商品资料已变化，请先补充完整');
-  for (const product of selected)
-    requireEnabledPlatform(isTaobaoProduct(product!) ? 'taobao' : 'pdd');
+  for (const product of selected) {
+    // 资料模板必须与目标店铺平台一致：淘宝模板的资料不能投到拼多多店铺，反之亦然。
+    // 以前这条是靠「淘宝未开放」顺带挡住的，两个平台都开放后必须显式校验。
+    const productPlatform = isTaobaoProduct(product!) ? 'taobao' : 'pdd';
+    requireEnabledPlatform(productPlatform);
+    if (productPlatform !== platform)
+      throw new Error(
+        `商品资料是${productPlatform === 'taobao' ? '淘宝' : '拼多多'}模板，不能投到${meta.label}店铺`,
+      );
+  }
   assertNoActiveTask(
     store.all<Task>('tasks'),
     shop.id,

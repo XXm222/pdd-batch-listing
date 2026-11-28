@@ -33,6 +33,7 @@ const mapping: Record<string, keyof Product> = {
   发货承诺: 'shipping',
   运费模板: 'freight',
   目标店铺: 'expectedShop',
+  商品视频ID: 'videoId',
 };
 function text(value: any): string {
   if (value === null || value === undefined) return '';

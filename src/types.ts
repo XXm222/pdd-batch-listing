@@ -76,6 +76,8 @@ export type Product = {
   threeToFour?: string[];
   whiteBg?: string[];
   usp?: string[];
+  /** 商品视频 ID（视频空间里的 videoId，先人工上传一次再复用）。 */
+  videoId?: string;
   /** 淘宝发品设置；拼多多商品为 undefined。 */
   taobao?: TaobaoListing;
   images: Record<string, Asset>;

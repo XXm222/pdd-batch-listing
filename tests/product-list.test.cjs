@@ -49,7 +49,7 @@ test('pagination, filters and selection retain hidden ready products and exclude
   assert.deepEqual([...selected], ['0', '41', 'missing', 'removed']);
 });
 
-test('valid archived Taobao products remain visible but cannot be selected for execution', () => {
+test('淘宝资料与拼多多资料都可执行；本机完整性与平台开放分别判断', () => {
   const pdd = product('pdd'),
     taobao = { ...product('taobao'), templateFormat: '淘宝运营模板 v4' };
   assert.deepEqual(problems(taobao), []);
@@ -57,7 +57,14 @@ test('valid archived Taobao products remain visible but cannot be selected for e
   const view = productList([pdd, taobao], '', 'all', 0, new Set([pdd.id, taobao.id]));
   assert.equal(view.rows.length, 2);
   assert.equal(view.readyCount, 2, '本机资料完整与平台是否开放分别判断');
-  assert.deepEqual(view.readyRows, [pdd]);
-  assert.deepEqual(view.chosen, [pdd]);
+  // 淘宝已开放：两种资料都可勾选执行
+  assert.deepEqual(
+    view.readyRows.map((one) => one.id),
+    [pdd.id, taobao.id],
+  );
+  assert.deepEqual(
+    view.chosen.map((one) => one.id),
+    [pdd.id, taobao.id],
+  );
   assert.equal(JSON.stringify(taobao), before);
 });

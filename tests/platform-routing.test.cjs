@@ -74,47 +74,57 @@ const input = ({ shop, products }) => ({ shopId: shop.id, productIds: products.m
 test('适配器注册表按店铺平台分发，未知或缺失平台回落到拼多多', () => {
   const registry = new PlatformRegistry('/isolated', async () => 'isolated-password');
   const pdd = registry.of('pdd');
-  assert.throws(() => registry.of('taobao'), /淘宝暂未开放/);
+  // 淘宝已开放：两个平台都能解析出各自适配器
+  const taobao = registry.of('taobao');
+  assert.equal(taobao.id, 'taobao');
+  assert.notEqual(taobao.adapter, pdd.adapter, '淘宝与拼多多必须是不同适配器');
   assert.equal(registry.of(undefined).id, 'pdd');
   assert.equal(registry.of('jd').id, 'pdd');
-  assert.throws(() => registry.adapterFor({ platform: 'taobao' }), /淘宝暂未开放/);
+  assert.equal(registry.adapterFor({ platform: 'taobao' }), taobao.adapter);
   assert.equal(registry.adapterFor({ platform: 'pdd' }), pdd.adapter);
   assert.equal(registry.adapterFor({}), pdd.adapter);
   assert.equal(pdd.portal, platformMeta('pdd').portal);
 });
 
-test('拼多多任务正常建立；淘宝禁用后不建立任务或更改已有店铺', async (t) => {
+test('两个平台都能建任务；资料模板与店铺平台不一致时拒绝', async (t) => {
   const pdd = await fixture(t, 'pdd');
   const ids = prepareTasks(pdd.store, input(pdd));
   const created = readTask(pdd.store, ids[0]);
   assert.equal(created.platform, 'pdd');
   assert.equal(created.shopSnapshot.platform, 'pdd');
 
+  // 淘宝已开放：淘宝店铺 + 淘宝模板资料可以正常建立任务
   const taobao = await fixture(t, 'taobao');
-  const before = taobao.store.all('shops');
-  assert.throws(() => prepareTasks(taobao.store, input(taobao)), /淘宝暂未开放/);
-  assert.equal(taobao.store.all('tasks').length, 0);
-  assert.deepEqual(taobao.store.all('shops'), before);
+  const tbProduct = {
+    ...taobao.products[0],
+    code: 'TB-001',
+    templateFormat: '淘宝运营模板 v4',
+    taobao: {
+      originProvince: '广东',
+      originCity: '深圳',
+      extractWay: '邮寄',
+      freightBearer: '卖家承担',
+      deliveryTime: '48小时',
+      shelfTime: '放入仓库',
+      auctionPoint: '0.5',
+    },
+  };
+  assert.deepEqual(problems(tbProduct), [], '淘宝资料必须通过淘宝侧校验');
+  taobao.store.saveProducts([tbProduct]);
+  const taobaoIds = prepareTasks(taobao.store, {
+    shopId: taobao.shop.id,
+    productIds: [tbProduct.id],
+  });
+  const taobaoTask = readTask(taobao.store, taobaoIds[0]);
+  assert.equal(taobaoTask.platform, 'taobao');
+  assert.equal(taobaoTask.productSnapshot.templateFormat, '淘宝运营模板 v4');
+  // 跨平台资料必须被拦住：淘宝模板的资料不能投到拼多多店铺
   const archived = { ...pdd.products[0], templateFormat: '淘宝运营模板 v4' };
   assert.deepEqual(problems(archived), []);
   pdd.store.saveProducts([archived]);
-  assert.throws(() => prepareTasks(pdd.store, input(pdd)), /淘宝暂未开放/);
+  assert.throws(() => prepareTasks(pdd.store, input(pdd)), /不能投到拼多多店铺/);
   assert.equal(pdd.store.all('tasks').length, 1, '不允许把淘宝资料投到拼多多店铺');
-  // 升级前保存的淘宝任务也不能经继续执行启动浏览器。
-  const oldTask = {
-    ...created,
-    id: randomUUID(),
-    shopId: taobao.shop.id,
-    platform: 'taobao',
-    shopSnapshot: { ...created.shopSnapshot, platform: 'taobao' },
-  };
-  taobao.store.saveTasks([oldTask]);
-  const runner = new TaskRunner(taobao.store, taobao.directory, () => {
-    throw Error('不应调用适配器');
-  });
-  assert.throws(() => runner.start([oldTask.id]), /淘宝暂未开放/);
-  assert.equal(runner.isActive, false);
-  assert.deepEqual(readTask(taobao.store, oldTask.id), oldTask);
+  // 「任务平台 ≠ 店铺当前平台」由下面的专项用例覆盖，这里不再重复。
 });
 
 test('任务记录的平台与店铺当前平台不一致时停止执行，不投到另一个后台', async (t) => {

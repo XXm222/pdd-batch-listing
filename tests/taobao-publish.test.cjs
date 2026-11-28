@@ -212,6 +212,23 @@ test('规格计划：单规格商品不需要建规格', () => {
   assert.deepEqual(taobaoSkuPlan({ skus: [] }), { kind: 'single' });
 });
 
+test('图片说明：资料里有但没上传的位必须显式说出来', () => {
+  const slots = {
+    mainImagesGroup: { count: 5 },
+    descRepublicOfSell: { count: 12 },
+    threeToFourImages: { count: 0 },
+    yinHeWhiteBgImage: { count: 0 },
+    uspImageV3: { count: 0 },
+    guideImageGroup: { count: 1 },
+  };
+  const text = taobaoImageSummary(slots, { threeToFourImages: 3, yinHeWhiteBgImage: 1 });
+  assert.match(text, /3:4主图 0 张/);
+  assert.match(text, /3:4主图资料有 3 张但未自动上传/);
+  assert.match(text, /白底图资料有 1 张但未自动上传/);
+  // 已经传上去的位不再提示
+  assert.doesNotMatch(text, /1:1主图资料有/);
+});
+
 test('规格计划：单维度多值生成建规格清单与逐行价格', () => {
   const plan = taobaoSkuPlan({
     skus: [
@@ -292,6 +309,39 @@ test('规格计划：两个维度生成交叉组合，不再压成一条', () =>
   assert.equal(plan.rows.length, 4);
   assert.deepEqual(plan.rows[0], { values: ['紫', '大'], price: '99', quantity: '1' });
   assert.deepEqual(plan.rows[3], { values: ['红', '小'], price: '88', quantity: '4' });
+});
+
+test('规格计划：行顺序按后台交叉组合重排（Excel 乱序也对得上）', () => {
+  const mk = (c, z, price) => ({
+    spec: `${c}/${z}`,
+    group: '',
+    single: price,
+    stock: '1',
+    options: [
+      { name: '颜色分类', value: c },
+      { name: '尺寸', value: z },
+    ],
+  });
+  // Excel 里故意写成「乱序」：粉色在前、尺寸交错
+  const plan = taobaoSkuPlan({
+    skus: [
+      mk('粉色', '小号', '3'),
+      mk('蓝色', '小号', '2'),
+      mk('粉色', '大号', '4'),
+      mk('蓝色', '大号', '1'),
+    ],
+  });
+  assert.equal(plan.kind, 'dimensions');
+  // 取值顺序 = 在 SKU 清单里首次出现的顺序（粉色先出现），行顺序 = 按该顺序做笛卡尔积；
+  // 建规格时也按同一顺序写入，所以表格行序与这里的行序天然一致。
+  assert.deepEqual(
+    plan.rows.map((r) => r.values.join('/')),
+    ['粉色/小号', '粉色/大号', '蓝色/小号', '蓝色/大号'],
+  );
+  assert.deepEqual(
+    plan.rows.map((r) => r.price),
+    ['3', '4', '2', '1'],
+  );
 });
 
 test('规格计划：交叉组合不齐必须报错，否则后台生成的表与资料对不上', () => {
