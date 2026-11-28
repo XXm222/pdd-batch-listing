@@ -177,7 +177,7 @@ test('missing PDD in the connected browser opens a new tab through the same exte
     assert.deepEqual(commands[2].args, {
       url: homeTab.url,
       newTab: true,
-      group_title: '商品运营台',
+      group_title: '电商批量上架助手',
     });
     assert.equal(new Set(commands.map((c) => c.session)).size, 1);
     assert.match(commands[0].session, /^goods-workspace-[a-f0-9-]{36}$/);
@@ -239,7 +239,7 @@ test('a closed current session tab recovers by opening a fresh PDD tab without t
       assert.deepEqual(commands[1].args, {
         url: homeTab.url,
         newTab: true,
-        group_title: '商品运营台',
+        group_title: '电商批量上架助手',
       });
     }
   }));

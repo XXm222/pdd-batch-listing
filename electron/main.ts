@@ -56,6 +56,7 @@ protocol.registerSchemesAsPrivileged([
     privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
   },
 ]);
+// Keep Electron's existing identity for user data and saved shop credentials.
 app.setName('商品运营台');
 const apiDraftPreview =
   app.isPackaged &&
@@ -219,7 +220,7 @@ async function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 680,
-    title: apiDraftPreview ? '商品运营台 · API试用版' : '商品运营台',
+    title: apiDraftPreview ? '电商批量上架助手 · API试用版' : '电商批量上架助手',
     backgroundColor: '#f5f6f8',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -254,6 +255,7 @@ else {
   app
     .whenReady()
     .then(async () => {
+      app.setAboutPanelOptions({ applicationName: '电商批量上架助手' });
       await acknowledgeAutomaticInstall(
         path.join(app.getPath('userData'), 'updates'),
         app.getVersion(),
@@ -983,11 +985,11 @@ else {
           ...(process.platform === 'darwin'
             ? [
                 {
-                  label: '商品运营台',
+                  label: '电商批量上架助手',
                   submenu: [
-                    { role: 'about' as const },
+                    { role: 'about' as const, label: '关于电商批量上架助手' },
                     { type: 'separator' as const },
-                    { role: 'quit' as const },
+                    { role: 'quit' as const, label: '退出电商批量上架助手' },
                   ],
                 },
               ]

@@ -170,7 +170,7 @@ export function Settings({
             <div className="settings-copy">
               <h3>关于</h3>
               <p className="quiet-note">
-                商品运营台 {version || ''} · 本机运行，资料不出电脑 · 源码许可 PolyForm
+                电商批量上架助手 {version || ''} · 本机运行，资料不出电脑 · 源码许可 PolyForm
                 Noncommercial 1.0.0（非商业使用）
               </p>
             </div>

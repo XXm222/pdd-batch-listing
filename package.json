@@ -3,7 +3,7 @@
   "productName": "商品运营台",
   "version": "0.1.65",
   "private": true,
-  "description": "商品资料导入与店铺草稿工作台",
+  "description": "电商批量上架助手，从 Excel 导入商品资料并批量保存店铺草稿",
   "author": "商品运营台项目",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -45,7 +45,8 @@
   },
   "build": {
     "appId": "com.goodsworkspace.desktop",
-    "productName": "商品运营台",
+    "productName": "电商批量上架助手",
+    "executableName": "商品运营台",
     "directories": {
       "output": "release/0.1.65"
     },
@@ -60,6 +61,9 @@
     "mac": {
       "target": "dmg",
       "category": "public.app-category.business",
+      "extendInfo": {
+        "CFBundleName": "商品运营台"
+      },
       "identity": "-",
       "signIgnore": [
         "/bridge-runtime/"
@@ -70,6 +74,7 @@
     },
     "nsis": {
       "oneClick": false,
+      "shortcutName": "电商批量上架助手",
       "allowToChangeInstallationDirectory": true
     },
     "artifactName": "GoodsWorkspace-${version}-${os}-${arch}.${ext}",
